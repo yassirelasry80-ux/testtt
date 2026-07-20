@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  jupyter_oracle:
+    build: .
+    container_name: jupyter_oracle
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/app
+    environment:
+      # Optionnel: Variables d'environnement pour vos bases de données
+      - DB_USER_CRM=qlik
+      - DB_PASSWORD_CRM=qlik
+      - DB_DSN_CRM=193.100.100.102/erpv6
+      - DB_USER_1=cas
+      - DB_PASSWORD_1=tiger
+      - DB_DSN_1=10.1.201.214/erpv6
+      - DB_USER_2=cmgp
+      - DB_PASSWORD_2=tiger
+      - DB_DSN_2=193.100.100.214/erpv6
