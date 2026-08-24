@@ -18,8 +18,9 @@ def is_complex_script(sql_file_path):
     except Exception:
         return False
 
-def process_single_sql_file(sql_file_path, base_target_name, source_creds, target_creds):
-    logger.info(f"Démarrage traitement pour le fichier: {os.path.basename(sql_file_path)}")
+def process_single_sql_file(sql_file_path, base_target_name, source_creds, target_creds, prefix=""):
+    p_tag = f"[{prefix}]" if prefix else ""
+    logger.info(f"{p_tag} Démarrage traitement pour le fichier: {os.path.basename(sql_file_path)}")
     
     target_table_name = (base_target_name).upper()[:30]
     
@@ -28,7 +29,7 @@ def process_single_sql_file(sql_file_path, base_target_name, source_creds, targe
             select_query = f.read().strip()
             
         if not select_query:
-            logger.warning(f"Le fichier {sql_file_path} est vide. Ignoré.")
+            logger.warning(f"{p_tag} Le fichier {sql_file_path} est vide. Ignoré.")
             return True
 
         blocks = []
@@ -61,24 +62,24 @@ def process_single_sql_file(sql_file_path, base_target_name, source_creds, targe
                             upper_block = block.upper()
                     
                     if upper_block.startswith("SELECT") or upper_block.startswith("WITH"):
-                        logger.info(f"[{base_target_name}] Extraction des donnees (SELECT/WITH)...")
-                        stream_data(source_conn, target_conn, block, target_table_name)
+                        logger.info(f"{p_tag}[{base_target_name}] Extraction des donnees (SELECT/WITH)...")
+                        stream_data(source_conn, target_conn, block, target_table_name, prefix=prefix)
                     elif upper_block.startswith("COMMIT"):
                         source_conn.commit()
-                        logger.info(f"[{base_target_name}] COMMIT execute en source.")
+                        logger.info(f"{p_tag}[{base_target_name}] COMMIT execute en source.")
                     else:
-                        logger.info(f"[{base_target_name}] Execution script source (bloc {idx+1}/{len(blocks)})...")
+                        logger.info(f"{p_tag}[{base_target_name}] Execution script source (bloc {idx+1}/{len(blocks)})...")
                         source_cursor.execute(block)
             except Exception as inner_e:
-                logger.error(f"Erreur durant l'execution des blocs pour {base_target_name}: {inner_e}")
+                logger.error(f"{p_tag} Erreur durant l'execution des blocs pour {base_target_name}: {inner_e}")
                 for cleanup_block in blocks:
                     if cleanup_block.strip().upper().startswith("DROP"):
-                        logger.info(f"[{base_target_name}] Tentative de nettoyage suite a l'erreur: {cleanup_block[:50]}...")
+                        logger.info(f"{p_tag}[{base_target_name}] Tentative de nettoyage suite a l'erreur: {cleanup_block[:50]}...")
                         try:
                             clean_stmt = cleanup_block.strip(';')
                             source_cursor.execute(clean_stmt)
                         except Exception as drop_e:
-                            logger.warning(f"[{base_target_name}] Echec du nettoyage: {drop_e}")
+                            logger.warning(f"{p_tag}[{base_target_name}] Echec du nettoyage: {drop_e}")
                 raise inner_e
             finally:
                 source_cursor.close()
@@ -89,7 +90,7 @@ def process_single_sql_file(sql_file_path, base_target_name, source_creds, targe
         
         return True
     except Exception as e:
-        logger.error(f"Echec global sur {sql_file_path} : {str(e)}")
+        logger.error(f"{p_tag} Echec global sur {sql_file_path} : {str(e)}")
         return False
 
 def execute_bi_script(prefix, parent_dir, target_creds):
@@ -149,24 +150,24 @@ def execute_bi_script(prefix, parent_dir, target_creds):
 
                     if upper_block == "COMMIT":
                         target_conn.commit()
-                        logger.info(f"[{prefix}] [SCRIPT BI] COMMIT exécuté sur la base cible.")
+                        logger.info(f"[{prefix}][SCRIPT BI] COMMIT exécuté sur la base cible.")
                     elif block_clean:
-                        logger.info(f"[{prefix}] [SCRIPT BI] Exécution bloc {idx+1}/{len(blocks)}...")
+                        logger.info(f"[{prefix}][SCRIPT BI] Exécution bloc {idx+1}/{len(blocks)}...")
                         target_cursor.execute(block_clean)
                         target_conn.commit()
-                logger.info(f"[{prefix}] SCRIPT BI exécuté avec succès !")
+                logger.info(f"[{prefix}][SCRIPT BI] SCRIPT BI exécuté avec succès !")
             finally:
                 target_cursor.close()
         finally:
             target_conn.close()
         return True
     except Exception as e:
-        logger.error(f"[{prefix}] Échec global lors de l'exécution du script BI {bi_file_path} : {e}")
+        logger.error(f"[{prefix}][SCRIPT BI] Échec global lors de l'exécution du script BI {bi_file_path} : {e}")
         return False
 
 def run_for_filiale(prefix):
     logger.info("=" * 60)
-    logger.info(f"DÉMARRAGE DU TRAITEMENT POUR LA FILIALE : {prefix}")
+    logger.info(f"[{prefix}] DÉMARRAGE DU TRAITEMENT POUR LA FILIALE : {prefix}")
     logger.info("=" * 60)
     
     source_user = os.getenv(f"{prefix}_DB_SOURCE_USER")
@@ -190,7 +191,7 @@ def run_for_filiale(prefix):
                 break
     
     if not all([source_user, source_host, source_service, target_user, target_host, target_service, parent_dir]):
-        logger.warning(f"Configuration environnement incomplète pour {prefix} ! Vérifiez le fichier .env. Filiale ignorée.")
+        logger.warning(f"[{prefix}] Configuration environnement incomplète ! Vérifiez le fichier .env. Filiale ignorée.")
         return
 
     source_dsn = f"{source_host}:{source_port}/{source_service}"
@@ -202,7 +203,7 @@ def run_for_filiale(prefix):
     bloc_dirs = [os.path.join(parent_dir, d) for d in os.listdir(parent_dir) if d.startswith("bloc") and os.path.isdir(os.path.join(parent_dir, d))]
     
     if not bloc_dirs:
-         logger.warning(f"Aucun dossier commençant par 'bloc' trouvé sous {parent_dir} pour {prefix}.")
+         logger.warning(f"[{prefix}] Aucun dossier commençant par 'bloc' trouvé sous {parent_dir}.")
          return
          
     simple_tasks = []
@@ -218,7 +219,7 @@ def run_for_filiale(prefix):
                  simple_tasks.append((file_path, base_name))
 
     total = len(simple_tasks) + len(complex_tasks)
-    logger.info(f"{total} fichiers SQL identifiés pour {prefix} : "
+    logger.info(f"[{prefix}] {total} fichiers SQL identifiés : "
                 f"{len(simple_tasks)} simples (parallèle) | {len(complex_tasks)} complexes (séquentiel)")
     
     MAX_WORKERS = 5
@@ -230,20 +231,20 @@ def run_for_filiale(prefix):
         for sql_file, base_name in complex_tasks:
             logger.info(f"[{prefix}] [SÉQUENTIEL] Traitement de {base_name}...")
             try:
-                is_success = process_single_sql_file(sql_file, base_name, source_creds, target_creds)
+                is_success = process_single_sql_file(sql_file, base_name, source_creds, target_creds, prefix)
                 if is_success:
                     success_count += 1
                 else:
                     failure_count += 1
             except Exception as exc:
-                logger.error(f"Le fichier {sql_file} a levé l'exception: {exc}")
+                logger.error(f"[{prefix}] Le fichier {sql_file} a levé l'exception: {exc}")
                 failure_count += 1
     
     if simple_tasks:
         logger.info(f"[{prefix}] === PHASE 2 : Scripts simples (PARALLÈLE x{MAX_WORKERS}) ===")
         with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix=f"{prefix}-Worker") as executor:
             future_to_sql = {
-                executor.submit(process_single_sql_file, sql_file, base_name, source_creds, target_creds): sql_file 
+                executor.submit(process_single_sql_file, sql_file, base_name, source_creds, target_creds, prefix): sql_file 
                 for sql_file, base_name in simple_tasks
             }
             
@@ -256,13 +257,13 @@ def run_for_filiale(prefix):
                     else:
                         failure_count += 1
                 except Exception as exc:
-                    logger.error(f"Le fichier {sql_file} a levé l'exception: {exc}")
+                    logger.error(f"[{prefix}] Le fichier {sql_file} a levé l'exception: {exc}")
                     failure_count += 1
                 
     logger.info("-" * 40)
-    logger.info(f"FIN DATAMARTS POUR {prefix}")
-    logger.info(f"Fichiers traités avec succès : {success_count}/{total}")
-    logger.info(f"Fichiers en échec : {failure_count}/{total}")
+    logger.info(f"[{prefix}] FIN DATAMARTS POUR {prefix}")
+    logger.info(f"[{prefix}] Fichiers traités avec succès : {success_count}/{total}")
+    logger.info(f"[{prefix}] Fichiers en échec : {failure_count}/{total}")
     logger.info("-" * 40)
 
     # Exécution du script BI post-ETL si présent (ex: CAS, PROCESS)
