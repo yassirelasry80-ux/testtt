@@ -200,11 +200,17 @@ def run_for_filiale(prefix):
     source_creds = (source_user, source_password, source_dsn)
     target_creds = (target_user, target_password, target_dsn)
 
-    bloc_dirs = [os.path.join(parent_dir, d) for d in os.listdir(parent_dir) if d.startswith("bloc") and os.path.isdir(os.path.join(parent_dir, d))]
+    # Tri : le dossier *_controle_gestion passe toujours en premier, les autres suivent par ordre alphabétique
+    bloc_dirs = sorted(
+        [os.path.join(parent_dir, d) for d in os.listdir(parent_dir)
+         if d.startswith("bloc") and os.path.isdir(os.path.join(parent_dir, d))],
+        key=lambda d: (0 if os.path.basename(d).endswith("_controle_gestion") else 1, os.path.basename(d))
+    )
     
     if not bloc_dirs:
          logger.warning(f"[{prefix}] Aucun dossier commençant par 'bloc' trouvé sous {parent_dir}.")
          return
+
          
     simple_tasks = []
     complex_tasks = []

@@ -1,3 +1,4 @@
+import os
 import oracledb
 import logging
 
@@ -6,23 +7,39 @@ oracledb.defaults.fetch_decimals = True
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Timeout TCP de connexion en secondes (défaut : 30s)
+CONNECT_TIMEOUT = float(os.getenv("DB_CONNECT_TIMEOUT", "30"))
+# Timeout d'exécution d'une instruction SQL en millisecondes (défaut : 10 min)
+CALL_TIMEOUT_MS  = int(os.getenv("DB_CALL_TIMEOUT_MS", str(10 * 60 * 1000)))
+
+_oracle_client_initialized = False
+
 def get_connection(user, password, dsn):
+    global _oracle_client_initialized
+    if not _oracle_client_initialized:
+        try:
+            oracledb.init_oracle_client()
+            _oracle_client_initialized = True
+        except oracledb.ProgrammingError:
+            _oracle_client_initialized = True  # déjà initialisé
+        except Exception as e:
+            logger.warning(f"Erreur d'initialisation du client Oracle (mode Thick) : {e}")
 
     try:
-        oracledb.init_oracle_client()
-    except oracledb.ProgrammingError:
-        pass
-    except Exception as e:
-        logger.warning(f"Erreur d'initialisation du client Oracle (mode Thick) : {e}")
-
-    try:
-        conn = oracledb.connect(user=user, password=password, dsn=dsn)
+        conn = oracledb.connect(
+            user=user,
+            password=password,
+            dsn=dsn,
+            tcp_connect_timeout=CONNECT_TIMEOUT
+        )
         with conn.cursor() as cursor:
+            cursor.callTimeout = CALL_TIMEOUT_MS
             cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'DD/MM/YYYY HH24:MI:SS'")
             cursor.execute("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'DD/MM/YYYY HH24:MI:SS.FF'")
+        logger.debug(f"Connexion établie à {dsn} (tcp_timeout={CONNECT_TIMEOUT}s, call_timeout={CALL_TIMEOUT_MS}ms)")
         return conn
     except Exception as e:
-        logger.error(f"Erreur lors de la connexion a {dsn} avec l'utilisateur {user}: {e}")
+        logger.error(f"Erreur lors de la connexion à {dsn} avec l'utilisateur {user}: {e}")
         raise
 
 def map_oracle_type(description):
@@ -160,7 +177,9 @@ def stream_data(source_conn, target_conn, select_query, target_table_name, batch
 
     try:
         source_cursor = source_conn.cursor()
+        source_cursor.callTimeout = CALL_TIMEOUT_MS
         target_cursor = target_conn.cursor()
+        target_cursor.callTimeout = CALL_TIMEOUT_MS
 
         logger.info(f"{p_tag}[{target_table_name}] Execution de la requete source...")
         source_cursor.execute(select_query)
