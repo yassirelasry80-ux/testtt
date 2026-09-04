@@ -1,0 +1,1 @@
+select a.itmref_0 code,(select d1.des1axx_0 from itmmaster d1 where d1.itmref_0=a.itmref_0) libelle,sum(a.qtypcu_0) qte from stojou a where a.iptdat_0 between '01/01/2025' and '31/12/2026'  and a.vcrnum_0 not like 'INV%' and a.vcrnum_0 like 'INI%200%_9%'  group by a.itmref_0

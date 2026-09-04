@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 import oracledb
 import logging
 
@@ -10,37 +12,77 @@ logger = logging.getLogger(__name__)
 # Timeout TCP de connexion en secondes (défaut : 30s)
 CONNECT_TIMEOUT = float(os.getenv("DB_CONNECT_TIMEOUT", "30"))
 # Timeout d'exécution d'une instruction SQL en millisecondes (défaut : 10 min)
-CALL_TIMEOUT_MS  = int(os.getenv("DB_CALL_TIMEOUT_MS", str(10 * 60 * 1000)))
+CALL_TIMEOUT_MS = int(os.getenv("DB_CALL_TIMEOUT_MS", str(10 * 60 * 1000)))
+# Nombre de tentatives de connexion en cas d'échec (défaut : 3)
+MAX_RETRIES = int(os.getenv("DB_MAX_RETRIES", "3"))
+# Délai en secondes entre chaque tentative (défaut : 5s)
+RETRY_DELAY_SEC = float(os.getenv("DB_RETRY_DELAY_SEC", "5"))
 
 _oracle_client_initialized = False
+_oracle_init_lock = threading.Lock()  # verrou thread-safe pour l'init du client Oracle
 
-def get_connection(user, password, dsn):
+
+def _init_oracle_client():
+    """Initialise le client Oracle (mode Thick) de manière thread-safe."""
     global _oracle_client_initialized
-    if not _oracle_client_initialized:
+    with _oracle_init_lock:
+        if _oracle_client_initialized:
+            return
         try:
             oracledb.init_oracle_client()
-            _oracle_client_initialized = True
+            logger.info("Client Oracle (mode Thick) initialisé avec succès.")
         except oracledb.ProgrammingError:
-            _oracle_client_initialized = True  # déjà initialisé
+            pass  # déjà initialisé par un autre thread
         except Exception as e:
-            logger.warning(f"Erreur d'initialisation du client Oracle (mode Thick) : {e}")
+            logger.warning(f"Initialisation du client Oracle impossible (mode Thin activé) : {e}")
+        finally:
+            _oracle_client_initialized = True
 
-    try:
-        conn = oracledb.connect(
-            user=user,
-            password=password,
-            dsn=dsn,
-            tcp_connect_timeout=CONNECT_TIMEOUT
-        )
-        with conn.cursor() as cursor:
-            cursor.callTimeout = CALL_TIMEOUT_MS
-            cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'DD/MM/YYYY HH24:MI:SS'")
-            cursor.execute("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'DD/MM/YYYY HH24:MI:SS.FF'")
-        logger.debug(f"Connexion établie à {dsn} (tcp_timeout={CONNECT_TIMEOUT}s, call_timeout={CALL_TIMEOUT_MS}ms)")
-        return conn
-    except Exception as e:
-        logger.error(f"Erreur lors de la connexion à {dsn} avec l'utilisateur {user}: {e}")
-        raise
+
+def get_connection(user, password, dsn):
+    """
+    Ouvre une connexion Oracle avec retry automatique.
+    Paramètres configurables via .env :
+      DB_MAX_RETRIES    : nombre de tentatives (défaut 3)
+      DB_RETRY_DELAY_SEC: délai entre tentatives en secondes (défaut 5)
+      DB_CONNECT_TIMEOUT: timeout TCP de connexion en secondes (défaut 30)
+      DB_CALL_TIMEOUT_MS: timeout par instruction SQL en ms (défaut 600 000)
+    """
+    _init_oracle_client()
+
+    last_exception = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            conn = oracledb.connect(
+                user=user,
+                password=password,
+                dsn=dsn,
+                tcp_connect_timeout=CONNECT_TIMEOUT
+            )
+            with conn.cursor() as cursor:
+                cursor.callTimeout = CALL_TIMEOUT_MS
+                cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'DD/MM/YYYY HH24:MI:SS'")
+                cursor.execute("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'DD/MM/YYYY HH24:MI:SS.FF'")
+            if attempt > 1:
+                logger.info(f"Connexion établie à {dsn} après {attempt} tentative(s).")
+            else:
+                logger.debug(f"Connexion établie à {dsn} (tcp_timeout={CONNECT_TIMEOUT}s, call_timeout={CALL_TIMEOUT_MS}ms)")
+            return conn
+        except Exception as e:
+            last_exception = e
+            if attempt < MAX_RETRIES:
+                logger.warning(
+                    f"[Tentative {attempt}/{MAX_RETRIES}] Échec de connexion à {dsn} "
+                    f"(user={user}) : {e}. Nouvelle tentative dans {RETRY_DELAY_SEC}s..."
+                )
+                time.sleep(RETRY_DELAY_SEC)
+            else:
+                logger.error(
+                    f"Connexion à {dsn} (user={user}) impossible après {MAX_RETRIES} tentatives. "
+                    f"Dernière erreur : {e}"
+                )
+    raise last_exception
+
 
 def map_oracle_type(description):
 
@@ -175,6 +217,8 @@ def setup_target_table(target_cursor, table_name, cursor_description, prefix="")
 def stream_data(source_conn, target_conn, select_query, target_table_name, batch_size=70000, prefix=""):
     p_tag = f"[{prefix}]" if prefix else ""
 
+    source_cursor = None
+    target_cursor = None
     try:
         source_cursor = source_conn.cursor()
         source_cursor.callTimeout = CALL_TIMEOUT_MS
@@ -186,8 +230,8 @@ def stream_data(source_conn, target_conn, select_query, target_table_name, batch
         description = source_cursor.description
 
         if not description:
-             logger.warning(f"{p_tag}[{target_table_name}] La requete source n'a pas retourne de colonnes. Ignoree.")
-             return
+            logger.warning(f"{p_tag}[{target_table_name}] La requete source n'a pas retourne de colonnes. Ignoree.")
+            return
 
         setup_target_table(target_cursor, target_table_name, description, prefix=prefix)
 
@@ -197,26 +241,39 @@ def stream_data(source_conn, target_conn, select_query, target_table_name, batch
         insert_stmt = f"INSERT /*+ APPEND_VALUES */ INTO {target_table_name} ({', '.join(col_names)}) VALUES ({bind_vars})"
 
         total_rows = 0
-            
+
         while True:
             rows = source_cursor.fetchmany(batch_size)
             if not rows:
                 break
-            
+
             target_cursor.executemany(insert_stmt, rows)
-            target_conn.commit() 
+            target_conn.commit()
             total_rows += len(rows)
             logger.info(f"{p_tag}[{target_table_name}] {total_rows} lignes integrees...")
 
         logger.info(f"{p_tag}[{target_table_name}] Termine ! Total lignes: {total_rows}.")
 
     except Exception as e:
-         logger.error(f"{p_tag}[{target_table_name}] Erreur lors du traitement ETL: {e}")
-         target_conn.rollback()
-         raise
+        logger.error(f"{p_tag}[{target_table_name}] Erreur lors du traitement ETL: {e}")
+        try:
+            target_conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
-        source_cursor.close()
-        target_cursor.close()
+        # Fermeture sécurisée : les curseurs peuvent ne pas avoir été créés
+        if source_cursor is not None:
+            try:
+                source_cursor.close()
+            except Exception:
+                pass
+        if target_cursor is not None:
+            try:
+                target_cursor.close()
+            except Exception:
+                pass
+
 
 def verify_table_data(target_conn, base_table, test_table):
 

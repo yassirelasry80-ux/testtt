@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import time
 
-from db_utils import get_connection, stream_data, verify_table_data
+from db_utils import get_connection, stream_data, verify_table_data, CALL_TIMEOUT_MS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -21,13 +21,15 @@ def is_complex_script(sql_file_path):
 def process_single_sql_file(sql_file_path, base_target_name, source_creds, target_creds, prefix=""):
     p_tag = f"[{prefix}]" if prefix else ""
     logger.info(f"{p_tag} Démarrage traitement pour le fichier: {os.path.basename(sql_file_path)}")
-    
+
     target_table_name = (base_target_name).upper()[:30]
-    
+
+    source_conn = None
+    target_conn = None
     try:
         with open(sql_file_path, "r", encoding="utf-8") as f:
             select_query = f.read().strip()
-            
+
         if not select_query:
             logger.warning(f"{p_tag} Le fichier {sql_file_path} est vide. Ignoré.")
             return True
@@ -41,57 +43,67 @@ def process_single_sql_file(sql_file_path, base_target_name, source_creds, targe
                     current_block = []
             else:
                 current_block.append(line)
-        
+
         if current_block:
             joined = '\n'.join(current_block).strip()
             if joined:
                 blocks.append(joined)
 
+        # Ouverture des connexions — initialisées séparément pour eviter toute fuite
         source_conn = get_connection(*source_creds)
         target_conn = get_connection(*target_creds)
-        
+
+        source_cursor = source_conn.cursor()
+        source_cursor.callTimeout = CALL_TIMEOUT_MS  # timeout sur les blocs DDL/DML source
         try:
-            source_cursor = source_conn.cursor()
-            try:
-                for idx, block in enumerate(blocks):
-                    upper_block = block.upper()
-                    
-                    if not (upper_block.startswith("BEGIN") or upper_block.startswith("DECLARE")):
-                        if block.endswith(';'):
-                            block = block[:-1]
-                            upper_block = block.upper()
-                    
-                    if upper_block.startswith("SELECT") or upper_block.startswith("WITH"):
-                        logger.info(f"{p_tag}[{base_target_name}] Extraction des donnees (SELECT/WITH)...")
-                        stream_data(source_conn, target_conn, block, target_table_name, prefix=prefix)
-                    elif upper_block.startswith("COMMIT"):
-                        source_conn.commit()
-                        logger.info(f"{p_tag}[{base_target_name}] COMMIT execute en source.")
-                    else:
-                        logger.info(f"{p_tag}[{base_target_name}] Execution script source (bloc {idx+1}/{len(blocks)})...")
-                        source_cursor.execute(block)
-            except Exception as inner_e:
-                logger.error(f"{p_tag} Erreur durant l'execution des blocs pour {base_target_name}: {inner_e}")
-                for cleanup_block in blocks:
-                    if cleanup_block.strip().upper().startswith("DROP"):
-                        logger.info(f"{p_tag}[{base_target_name}] Tentative de nettoyage suite a l'erreur: {cleanup_block[:50]}...")
-                        try:
-                            clean_stmt = cleanup_block.strip(';')
-                            source_cursor.execute(clean_stmt)
-                        except Exception as drop_e:
-                            logger.warning(f"{p_tag}[{base_target_name}] Echec du nettoyage: {drop_e}")
-                raise inner_e
-            finally:
-                source_cursor.close()
-                
+            for idx, block in enumerate(blocks):
+                upper_block = block.upper()
+
+                if not (upper_block.startswith("BEGIN") or upper_block.startswith("DECLARE")):
+                    if block.endswith(';'):
+                        block = block[:-1]
+                        upper_block = block.upper()
+
+                if upper_block.startswith("SELECT") or upper_block.startswith("WITH"):
+                    logger.info(f"{p_tag}[{base_target_name}] Extraction des donnees (SELECT/WITH)...")
+                    stream_data(source_conn, target_conn, block, target_table_name, prefix=prefix)
+                elif upper_block.startswith("COMMIT"):
+                    source_conn.commit()
+                    logger.info(f"{p_tag}[{base_target_name}] COMMIT execute en source.")
+                else:
+                    logger.info(f"{p_tag}[{base_target_name}] Execution script source (bloc {idx+1}/{len(blocks)})...")
+                    source_cursor.execute(block)
+        except Exception as inner_e:
+            logger.error(f"{p_tag} Erreur durant l'execution des blocs pour {base_target_name}: {inner_e}")
+            for cleanup_block in blocks:
+                if cleanup_block.strip().upper().startswith("DROP"):
+                    logger.info(f"{p_tag}[{base_target_name}] Tentative de nettoyage suite a l'erreur: {cleanup_block[:50]}...")
+                    try:
+                        clean_stmt = cleanup_block.strip(';')
+                        source_cursor.execute(clean_stmt)
+                    except Exception as drop_e:
+                        logger.warning(f"{p_tag}[{base_target_name}] Echec du nettoyage: {drop_e}")
+            raise inner_e
         finally:
-            source_conn.close()
-            target_conn.close()
-        
+            source_cursor.close()
+
         return True
+
     except Exception as e:
         logger.error(f"{p_tag} Echec global sur {sql_file_path} : {str(e)}")
         return False
+    finally:
+        # Fermeture garantie des connexions même si l'une d'elles n'a pas pu s'ouvrir
+        if source_conn is not None:
+            try:
+                source_conn.close()
+            except Exception:
+                pass
+        if target_conn is not None:
+            try:
+                target_conn.close()
+            except Exception:
+                pass
 
 def execute_bi_script(prefix, parent_dir, target_creds):
     possible_files = [
@@ -103,7 +115,7 @@ def execute_bi_script(prefix, parent_dir, target_creds):
         if os.path.isfile(path):
             bi_file_path = path
             break
-    
+
     if not bi_file_path:
         logger.warning(f"[{prefix}] Aucun script BI trouvé sous {parent_dir}.")
         return False
@@ -112,6 +124,7 @@ def execute_bi_script(prefix, parent_dir, target_creds):
     logger.info(f"[{prefix}] DÉMARRAGE DU SCRIPT BI POST-ETL : {os.path.basename(bi_file_path)}")
     logger.info("=" * 60)
 
+    target_conn = None
     try:
         with open(bi_file_path, "r", encoding="utf-8") as f:
             sql_content = f.read().strip()
@@ -136,34 +149,44 @@ def execute_bi_script(prefix, parent_dir, target_creds):
                 blocks.append(joined)
 
         target_conn = get_connection(*target_creds)
+        target_cursor = target_conn.cursor()
+        target_cursor.callTimeout = CALL_TIMEOUT_MS
         try:
-            target_cursor = target_conn.cursor()
-            try:
-                for idx, block in enumerate(blocks):
-                    block_clean = block.strip()
-                    upper_block = block_clean.upper()
+            for idx, block in enumerate(blocks):
+                block_clean = block.strip()
+                upper_block = block_clean.upper()
 
-                    if not (upper_block.startswith("BEGIN") or upper_block.startswith("DECLARE")):
-                        if block_clean.endswith(';'):
-                            block_clean = block_clean[:-1].strip()
-                            upper_block = block_clean.upper()
+                if not (upper_block.startswith("BEGIN") or upper_block.startswith("DECLARE")):
+                    if block_clean.endswith(';'):
+                        block_clean = block_clean[:-1].strip()
+                        upper_block = block_clean.upper()
 
-                    if upper_block == "COMMIT":
-                        target_conn.commit()
-                        logger.info(f"[{prefix}][SCRIPT BI] COMMIT exécuté sur la base cible.")
-                    elif block_clean:
-                        logger.info(f"[{prefix}][SCRIPT BI] Exécution bloc {idx+1}/{len(blocks)}...")
-                        target_cursor.execute(block_clean)
-                        target_conn.commit()
-                logger.info(f"[{prefix}][SCRIPT BI] SCRIPT BI exécuté avec succès !")
-            finally:
-                target_cursor.close()
+                if upper_block == "COMMIT":
+                    target_conn.commit()
+                    logger.info(f"[{prefix}][SCRIPT BI] COMMIT exécuté sur la base cible.")
+                elif block_clean:
+                    logger.info(f"[{prefix}][SCRIPT BI] Exécution bloc {idx+1}/{len(blocks)}...")
+                    target_cursor.execute(block_clean)
+                    target_conn.commit()
+            logger.info(f"[{prefix}][SCRIPT BI] SCRIPT BI exécuté avec succès !")
         finally:
-            target_conn.close()
+            try:
+                target_cursor.close()
+            except Exception:
+                pass
         return True
+
     except Exception as e:
         logger.error(f"[{prefix}][SCRIPT BI] Échec global lors de l'exécution du script BI {bi_file_path} : {e}")
         return False
+    finally:
+        # Fermeture garantie de la connexion dans tous les cas
+        if target_conn is not None:
+            try:
+                target_conn.close()
+            except Exception:
+                pass
+
 
 def run_for_filiale(prefix):
     logger.info("=" * 60)
@@ -225,43 +248,54 @@ def run_for_filiale(prefix):
                  simple_tasks.append((file_path, base_name))
 
     total = len(simple_tasks) + len(complex_tasks)
+    TABLE_TIMEOUT_SEC = int(os.getenv("TABLE_TIMEOUT_SEC", "300"))
     logger.info(f"[{prefix}] {total} fichiers SQL identifiés : "
-                f"{len(simple_tasks)} simples (parallèle) | {len(complex_tasks)} complexes (séquentiel)")
-    
+                f"{len(simple_tasks)} simples (parallèle) | {len(complex_tasks)} complexes (séquentiel) "
+                f"| timeout par table : {TABLE_TIMEOUT_SEC}s")
+
     MAX_WORKERS = 5
     success_count = 0
     failure_count = 0
-    
+
     if complex_tasks:
         logger.info(f"[{prefix}] === PHASE 1 : Scripts complexes (SÉQUENTIEL) ===")
         for sql_file, base_name in complex_tasks:
             logger.info(f"[{prefix}] [SÉQUENTIEL] Traitement de {base_name}...")
+            seq_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"{prefix}-Seq")
+            f = seq_executor.submit(process_single_sql_file, sql_file, base_name, source_creds, target_creds, prefix)
             try:
-                is_success = process_single_sql_file(sql_file, base_name, source_creds, target_creds, prefix)
+                is_success = f.result(timeout=TABLE_TIMEOUT_SEC)
                 if is_success:
                     success_count += 1
                 else:
                     failure_count += 1
+            except TimeoutError:
+                logger.error(f"[{prefix}] [SÉQUENTIEL] TIMEOUT ({TABLE_TIMEOUT_SEC}s) dépassé pour '{base_name}'. Passage à la table suivante.")
+                failure_count += 1
             except Exception as exc:
                 logger.error(f"[{prefix}] Le fichier {sql_file} a levé l'exception: {exc}")
                 failure_count += 1
-    
+            finally:
+                seq_executor.shutdown(wait=False, cancel_futures=True)
+
     if simple_tasks:
         logger.info(f"[{prefix}] === PHASE 2 : Scripts simples (PARALLÈLE x{MAX_WORKERS}) ===")
         with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix=f"{prefix}-Worker") as executor:
             future_to_sql = {
-                executor.submit(process_single_sql_file, sql_file, base_name, source_creds, target_creds, prefix): sql_file 
+                executor.submit(process_single_sql_file, sql_file, base_name, source_creds, target_creds, prefix): (sql_file, base_name)
                 for sql_file, base_name in simple_tasks
             }
-            
-            for future in as_completed(future_to_sql):
-                sql_file = future_to_sql[future]
+
+            for future, (sql_file, base_name) in future_to_sql.items():
                 try:
-                    is_success = future.result()
+                    is_success = future.result(timeout=TABLE_TIMEOUT_SEC)
                     if is_success:
                         success_count += 1
                     else:
                         failure_count += 1
+                except TimeoutError:
+                    logger.error(f"[{prefix}] TIMEOUT ({TABLE_TIMEOUT_SEC}s) dépassé pour '{base_name}'. Passage à la table suivante.")
+                    failure_count += 1
                 except Exception as exc:
                     logger.error(f"[{prefix}] Le fichier {sql_file} a levé l'exception: {exc}")
                     failure_count += 1
@@ -274,8 +308,7 @@ def run_for_filiale(prefix):
 
     # Exécution du script BI post-ETL si présent (ex: CAS, PROCESS)
     possible_bi = [
-        os.path.join(parent_dir, "script_bi.sql"),
-        os.path.join(parent_dir, "script bi.sql")
+        os.path.join(parent_dir, "script_bi.sql")
     ]
     if any(os.path.isfile(p) for p in possible_bi):
         execute_bi_script(prefix, parent_dir, target_creds)

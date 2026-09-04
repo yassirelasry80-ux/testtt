@@ -1,0 +1,1121 @@
+create or replace procedure val_stock_glb(DATEDEBUT IN DATE,
+                                          DATEFIN   IN DATE) AUTHID CURRENT_USER IS
+
+begin
+
+  ------------------------------------------------------------------------joint
+
+  execute immediate ' truncate table  stock_emb ';
+  execute immediate ' insert into stock_emb
+select * from
+(
+select   substr(s.itmref_0,1,4)  fam,s.itmref_0 code,r.des1axx_0  libelle,sum(s.qtypcu_0) qte,0 CA_NET_HT,0 qtereel
+
+from stojou s,itmmaster r where r.itmref_0=s.itmref_0 and tclcod_0<>''PF'' and s.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || '''  and
+  ((substr(s.itmref_0,1,2) in (''CP'',''CR'',''BR'',''CG'')
+and s.stofcy_0=''U'') or (substr(s.itmref_0,1,2) in (''CV'',''BV'',''CP'')
+and s.stofcy_0=''U2'') or (substr(s.itmref_0,1,2) in (''CH'',''CV'',''CD'')
+and s.stofcy_0=''U3'')) and vcrnum_0 not like ''OUT%12U_9%''
+group by s.itmref_0,r.des1axx_0
+)';
+  execute immediate ' commit ';
+
+  ----------------------------------------------------------------
+  execute immediate ' drop table stat_fifo_emb ';
+  execute immediate ' create table stat_fifo_emb as 
+select * from
+(
+select pthnum_0,itmref_0,lin,to_char(rcpdat_0,''YYMMDD'') mois,qte qte,(round(prixrev,6)) prixrev from
+(
+select rr.pthnum_0,rr.rcpdat_0,rr.itmref_0,rr.lin,rr.qtypuu_0 qte,rr.netpri_0,decode(rr.mltcur_0,null,rr.ratcur,rr.mltcur_0) cur,
+decode(rr.xprirev_0,null,decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0)),
+'''',decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0))
+,0,decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0)),rr.xprirev_0) prixrev,
+cpr2 from
+(
+select   p.pthnum_0,p.rcpdat_0,p.itmref_0,p.ptdlin_0 lin,p.itmdes1_0,p.qtypuu_0,(select oo.netpri_0 from porderp oo where oo.pohnum_0=p.pohnum_0 and oo.poplin_0=p.poplin_0 and oo.popseq_0=p.poqseq_0) netpri_0
+,kk.xprirev_0,kk.mltcur_0
+,(select ii.cpr_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.ydanum_0<>'' '') cpr,
+(select  sum(p2.cpr_0 )
+from preceiptd pa, pinvoiced p1, pinvoiced p2, pinvoice xx
+where pa.pthnum_0=p1.numori_0 and pa.ptdlin_0=p1.linori_0 and pa.itmref_0=p1.itmref_0 and p1.num_0=xx.num_0
+and p1.num_0=p2.numori_0 and p1.pidlin_0=p2.pidlin_0 and pa.pthnum_0=p.pthnum_0 and pa.itmref_0=p.itmref_0) cpr2,
+
+decode((select i.ratmlt_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.ydanum_0<>'' '') , null,
+
+(select distinct chgrat_0 from tabchange where curden_0=''MAD'' and cur_0=(select distinct CUR_0 from preceipt x where x.pthnum_0=p.pthnum_0)
+and chgtyp_0=1 and chgstrdat_0=(select max(chgstrdat_0) from TABCHANGE where  cur_0 =(select distinct CUR_0 from preceipt x where x.pthnum_0=p.pthnum_0))),
+
+(select i.ratmlt_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.ydanum_0<>'' '' )) ratcur
+
+,(select (sum((c.amtnotlin_0*ee.ratmlt_0 )/(ee.amtnot_0*ee.ratmlt_0)*eg.amtnotlin_0*eeg.ratmlt_0))/c.qtypuu_0
+
+from pinvoiced c , pinvoice ee ,pinvoiced eg,pinvoice eeg
+where ee.num_0=c.num_0 and c.pthnum_0=p.pthnum_0 and c.itmref_0=p.itmref_0 and c.ptdlin_0=p.ptdlin_0 and ee.xdanum_0=eeg.xdanum_0 and eg.num_0=eeg.num_0 and ee.xdanum_0<>'' '' 
+group by c.itmref_0,c.qtypuu_0,c.amtnotlin_0,ee.ratmlt_0,ee.amtnot_0) priprov
+
+from preceiptd p,xgpohlin  k ,xgdetpri kk
+where p.pthnum_0=k.pthnum_0 (+) and p.ptdlin_0=k.ptdlin_0 (+) and p.rcpdat_0  between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and substr(p.bpsnum_0,1,1) between ''0'' and ''1''
+and k.itmref_0=kk.itmref_0 (+) and k.xdanum_0=kk.xdanum_0 (+) and p.itmref_0 in (select code from stock_emb)
+)rr
+)
+group by pthnum_0,itmref_0,lin,to_char(rcpdat_0,''YYMMDD''),qte,prixrev
+
+union
+
+(
+select x.pthnum_0,x.itmref_0,ptdlin_0 lin,to_char(x.rcpdat_0,''YYMMDD'') Mois,sum(x.qtypuu_0 ) qte,x.netpri_0 PrixRev
+ from preceiptd x where x.rcpdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || '''
+and   substr(x.bpsnum_0,1,1) between ''2'' and ''9'' and x.itmref_0 in (select code from stock_emb)
+group by x.pthnum_0,x.itmref_0,ptdlin_0,to_char(x.rcpdat_0,''YYMMDD''),x.netpri_0
+)
+
+union
+
+select x.vcrnum_0,x.itmref_0,vcrlin_0 lin,to_char(x.iptdat_0,''YYMMDD'') Mois,sum(x.qtypcu_0) qte
+,decode(substr(x.vcrnum_0,1,3),''BFM'',round((select ((select sum(qtypcu_0*priord_0) from smvtd d where  vcrlin_0<>1 and d.vcrnum_0=h.vcrnum_0)/qtypcu_0)
+from smvtd h where h.vcrnum_0=x.vcrnum_0 and h.itmref_0=x.itmref_0 and vcrlin_0=1),4),priord_0) PrixRev
+ from stojou x where  x.itmref_0 in (select code from stock_emb)
+ and
+ ((substr(x.vcrnum_0,1,3) in (''BFM'',''ATL'',''ENT'',''MTK'') and x.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''   and x.trstyp_0 in (1,5))
+  or ( ( vcrtyp_0=19   and x.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || ''' )))
+
+group by x.vcrnum_0,x.itmref_0,vcrlin_0,to_char(x.iptdat_0,''YYMMDD''),x.priord_0 having sum(x.qtypcu_0)>0
+
+)
+order by 2,3 ';
+  -----
+  execute immediate ' drop table fifo2018_stat_emb';
+  execute immediate ' create table fifo2018_stat_emb as select ff.mois,ff.itmref_0,ff.prixrev,sum(ff.qte) qte from stat_fifo_emb ff group by ff.mois,ff.itmref_0,ff.prixrev ';
+  execute immediate ' drop table synthesefifo_emb ';
+  execute immediate ' create table synthesefifo_emb as select itmref_0,mois,prixrev,sum(qte) qte,max(0) montant,max(0) qtetraiter,max(0) prix_rec from stat_fifo_emb group by mois,itmref_0,prixrev ';
+  execute immediate ' drop table stock_ini_fifo_emb ';
+  execute immediate ' create table stock_ini_fifo_emb as select   code, qte stock,0 prixrev  from    stock_emb ';
+  execute immediate ' drop table wrelq_espion_emb ';
+  execute immediate ' create table wrelq_espion_emb (des varchar2(50),mnt number(22,2)) ';
+  declare
+    cursor cur2 is
+      select rowid, t.itmref_0, t.mois, t.prixrev, qte, qtetraiter
+        from synthesefifo_emb t
+       order by 2, 3 desc;
+    cursor cur1 is
+      select code, stock from stock_ini_fifo_emb order by 1;
+  
+    wcode_cur2  varchar2(60);
+    wmois_cur2  varchar2(6);
+    wprix_cur2  number;
+    wqte_cur2   number;
+    wwprix_sauv number;
+    wcode_cur1  varchar2(60);
+    wqte_cur1   number;
+    wid         varchar2(100);
+    wqte        number;
+  
+    wreliquat      number;
+    wsauv_reliquat number;
+    wmontant       number;
+    passe          integer;
+    neg            integer;
+    wqtetraiter    number(22);
+  begin
+    open cur1;
+    loop
+      open cur2;
+      fetch cur1
+        into wcode_cur1, wqte_cur1;
+      if cur1%notfound then
+        exit;
+      end if;
+      wreliquat      := wqte_cur1;
+      wsauv_reliquat := 0;
+      passe          := 0;
+      neg            := 0;
+      loop
+        fetch cur2
+          into wid,
+               wcode_cur2,
+               wmois_cur2,
+               wprix_cur2,
+               wqte_cur2,
+               wqtetraiter;
+        if cur2%notfound then
+          exit;
+        end if;
+        if wcode_cur1 = wcode_cur2 then
+          wsauv_reliquat := wreliquat;
+          wreliquat      := wreliquat - wqte_cur2;
+          insert into wrelq_espion_emb values ('wreliquat', wreliquat);
+          if wreliquat > 0 then
+            wmontant    := wqte_cur2 * wprix_cur2;
+            wwprix_sauv := wprix_cur2;
+            wqte        := wqte_cur2;
+          elsif wreliquat <= 0 then
+            wmontant := wsauv_reliquat * wprix_cur2;
+            wqte     := wsauv_reliquat;
+            neg      := 1;
+          end if;
+          insert into wrelq_espion_emb values ('wmontant', wmontant);
+          insert into wrelq_espion_emb values ('wqte', wqte);
+          insert into wrelq_espion_emb values ('wprix_cur2', wprix_cur2);
+          update synthesefifo_emb a
+             set a.montant = wmontant, a.qtetraiter = wqte
+           where a.itmref_0 = wcode_cur2
+             and a.mois = wmois_cur2
+             and a.qte = wqte_cur2
+             and a.rowid = wid;
+          commit;
+          passe := 1;
+        end if;
+        if neg = 1 then
+          wqte := 0;
+          exit;
+        end if;
+        if wcode_cur1 <> wcode_cur2 and passe = 1 then
+          wqte := 0;
+          exit;
+        end if;
+      end loop;
+      close cur2;
+    end loop;
+    close cur1;
+  end;
+  --------------------------------------------------------------------------------- ---
+  update stock_ini_fifo_emb z
+     set z.prixrev = nvl((select sum(montant) /
+                                decode(sum(qtetraiter),
+                                       0,
+                                       9999999999999999,
+                                       sum(qtetraiter))
+                           from synthesefifo_emb zz
+                          where trim(zz.itmref_0) = trim(z.code)),
+                         0);
+  commit;
+  ------------------------------------------------------------------------march
+  execute immediate ' truncate table sta_art';
+  execute immediate ' insert into  sta_art select  (select f1.tsicod_2 from itmmaster f1 where f1.itmref_0=i.itmref_0)  fam,
+i.itmref_0 code,(select d1.des1axx_0 from itmmaster d1 where d1.itmref_0=i.itmref_0) libelle,sum(i.qtypcu_0) qte,0 CA_NET_HT
+from stojou i where iptdat_0 between ''' || DATEDEBUT ||
+                    ''' and ''' || DATEFIN || '''
+and (itmref_0 in (select itmref_0 from itmmaster where acccod_0=''MRCH''  ) or itmref_0=''010-H1010-225X'' ) and vcrnum_0 not like ''OUT%12U_9%'' group by i.itmref_0 ';
+  execute immediate ' commit';
+  execute immediate ' drop table  sta_art_glb_joint ';
+  execute immediate ' create table  sta_art_glb_joint as select code,sum(qte) qte,sum(ca_net_ht) ca_net_ht from sta_art group by code ';
+  execute immediate ' drop table stat_fifo_joint ';
+  execute immediate ' create table stat_fifo_joint as
+select * from
+(
+select pthnum_0,itmref_0,lin,to_char(rcpdat_0,''YYMMDD'') mois,qte qte,(round(prixrev,6)) prixrev from 
+(
+select rr.pthnum_0,rr.rcpdat_0,rr.itmref_0,rr.lin,rr.qtypuu_0 qte,rr.netpri_0,decode(rr.mltcur_0,null,rr.ratcur,rr.mltcur_0) cur,
+decode(rr.xprirev_0,null,decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0)),
+'''',decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0))
+,0,decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0)),rr.xprirev_0) prixrev,
+cpr2 from
+(
+select   p.pthnum_0,p.rcpdat_0,p.itmref_0,p.ptdlin_0 lin,p.itmdes1_0,p.qtypuu_0,(select oo.netpri_0 from porderp oo where oo.pohnum_0=p.pohnum_0 and oo.poplin_0=p.poplin_0 and oo.popseq_0=p.poqseq_0) netpri_0
+,kk.xprirev_0,kk.mltcur_0
+,(select ii.cpr_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.ydanum_0<>'' '') cpr,
+(select  sum(p2.cpr_0 )
+from preceiptd pa, pinvoiced p1, pinvoiced p2, pinvoice xx
+where pa.pthnum_0=p1.numori_0 and pa.ptdlin_0=p1.linori_0 and pa.itmref_0=p1.itmref_0 and p1.num_0=xx.num_0
+and p1.num_0=p2.numori_0 and p1.pidlin_0=p2.pidlin_0 and pa.pthnum_0=p.pthnum_0 and pa.itmref_0=p.itmref_0) cpr2,
+
+decode((select i.ratmlt_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.ydanum_0<>'' '') , null,
+
+(select distinct chgrat_0 from tabchange where curden_0=''MAD'' and cur_0=(select distinct CUR_0 from preceipt x where x.pthnum_0=p.pthnum_0) 
+and chgtyp_0=1 and chgstrdat_0=(select max(chgstrdat_0) from TABCHANGE where  cur_0 =(select distinct CUR_0 from preceipt x where x.pthnum_0=p.pthnum_0))),
+
+(select i.ratmlt_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.ydanum_0<>'' '')) ratcur 
+
+,(select (sum((c.amtnotlin_0*ee.ratmlt_0 )/(ee.amtnot_0*ee.ratmlt_0)*eg.amtnotlin_0*eeg.ratmlt_0))/c.qtypuu_0
+
+from pinvoiced c , pinvoice ee ,pinvoiced eg,pinvoice eeg
+where ee.num_0=c.num_0 and c.pthnum_0=p.pthnum_0 and c.itmref_0=p.itmref_0 and c.ptdlin_0=p.ptdlin_0 and ee.xdanum_0=eeg.xdanum_0 and eg.num_0=eeg.num_0 and ee.xdanum_0<>'' ''
+group by c.itmref_0,c.qtypuu_0,c.amtnotlin_0,ee.ratmlt_0,ee.amtnot_0) priprov
+
+from preceiptd p,xgpohlin  k ,xgdetpri kk 
+where p.pthnum_0=k.pthnum_0 (+) and p.ptdlin_0=k.ptdlin_0 (+) and p.rcpdat_0  between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' and substr(p.bpsnum_0,1,1) between ''0'' and ''1''
+and k.itmref_0=kk.itmref_0 (+) and k.xdanum_0=kk.xdanum_0 (+) and p.itmref_0 in (select code from sta_art_glb_joint)
+)rr
+)
+group by pthnum_0,itmref_0,lin,to_char(rcpdat_0,''YYMMDD''),qte,prixrev
+
+union
+
+(
+select x.pthnum_0,x.itmref_0,ptdlin_0 lin,to_char(x.rcpdat_0,''YYMMDD'') Mois,sum(x.qtypuu_0 ) qte,x.netpri_0 PrixRev
+ from preceiptd x where x.rcpdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || ''' 
+and   substr(x.bpsnum_0,1,1) between ''2'' and ''9'' and x.itmref_0 in (select code from sta_art_glb_joint)
+group by x.pthnum_0,x.itmref_0,ptdlin_0,to_char(x.rcpdat_0,''YYMMDD''),x.netpri_0
+)
+
+union
+
+select x.vcrnum_0,x.itmref_0,vcrlin_0 lin,to_char(x.iptdat_0,''YYMMDD'') Mois,sum(x.qtypcu_0) qte
+,decode(substr(x.vcrnum_0,1,3),''BFM'',round((select ((select sum(qtypcu_0*priord_0) from smvtd d where  vcrlin_0<>1 and d.vcrnum_0=h.vcrnum_0)/qtypcu_0) 
+from smvtd h where h.vcrnum_0=x.vcrnum_0 and h.itmref_0=x.itmref_0 and vcrlin_0=1),4),priord_0) PrixRev
+ from stojou x where  x.itmref_0 in (select code from sta_art_glb_joint) 
+ and
+ ((substr(x.vcrnum_0,1,3) in (''BFM'',''ATL'',''ENT'','' '') and x.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and x.trstyp_0 in (1,5))  
+  or ( ( vcrtyp_0=19   and x.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || ''' )))
+                                                               
+group by x.vcrnum_0,x.itmref_0,vcrlin_0,to_char(x.iptdat_0,''YYMMDD''),x.priord_0 having sum(x.qtypcu_0)>0
+ 
+)
+order by 2,3 ';
+  -----
+  execute immediate ' drop table fifo2018_stat_joint ';
+  execute immediate ' create table fifo2018_stat_joint as select ff.mois,ff.itmref_0,ff.prixrev,sum(ff.qte) qte from stat_fifo ff group by ff.mois,ff.itmref_0,ff.prixrev ';
+  execute immediate ' drop table synthesefifo_joint ';
+  execute immediate ' create table synthesefifo_joint as select itmref_0,mois,prixrev,sum(qte) qte,max(0) montant,max(0) qtetraiter,max(0) prix_rec from stat_fifo_joint group by mois,itmref_0,prixrev ';
+  execute immediate ' drop table stock_ini_fifo_joint';
+  execute immediate ' create table stock_ini_fifo_joint as select   code, qte stock,0 prixrev  from    sta_art_glb_joint ';
+  execute immediate ' drop table wrelq_espion_joint ';
+  execute immediate ' create table wrelq_espion_joint (des varchar2(50),mnt number(22,2)) ';
+
+  declare
+    cursor cur2 is
+      select rowid, t.itmref_0, t.mois, t.prixrev, qte, qtetraiter
+        from synthesefifo_joint t
+       order by 2, 3 desc;
+    cursor cur1 is
+      select code, stock from stock_ini_fifo_joint order by 1;
+  
+    wcode_cur2  varchar2(60);
+    wmois_cur2  varchar2(6);
+    wprix_cur2  number;
+    wqte_cur2   number;
+    wwprix_sauv number;
+    wcode_cur1  varchar2(60);
+    wqte_cur1   number;
+    wid         varchar2(100);
+    wqte        number;
+  
+    wreliquat      number;
+    wsauv_reliquat number;
+    wmontant       number;
+    passe          integer;
+    neg            integer;
+    wqtetraiter    number(22);
+  begin
+    open cur1;
+    loop
+      open cur2;
+      fetch cur1
+        into wcode_cur1, wqte_cur1;
+      if cur1%notfound then
+        exit;
+      end if;
+      wreliquat      := wqte_cur1;
+      wsauv_reliquat := 0;
+      passe          := 0;
+      neg            := 0;
+      loop
+        fetch cur2
+          into wid,
+               wcode_cur2,
+               wmois_cur2,
+               wprix_cur2,
+               wqte_cur2,
+               wqtetraiter;
+        if cur2%notfound then
+          exit;
+        end if;
+        if wcode_cur1 = wcode_cur2 then
+          wsauv_reliquat := wreliquat;
+          wreliquat      := wreliquat - wqte_cur2;
+          insert into wrelq_espion_joint values ('wreliquat', wreliquat);
+          if wreliquat > 0 then
+            wmontant    := wqte_cur2 * wprix_cur2;
+            wwprix_sauv := wprix_cur2;
+            wqte        := wqte_cur2;
+          elsif wreliquat <= 0 then
+            wmontant := wsauv_reliquat * wprix_cur2;
+            wqte     := wsauv_reliquat;
+            neg      := 1;
+          end if;
+          insert into wrelq_espion_joint values ('wmontant', wmontant);
+          insert into wrelq_espion_joint values ('wqte', wqte);
+          insert into wrelq_espion_joint values ('wprix_cur2', wprix_cur2);
+          update synthesefifo_joint a
+             set a.montant = wmontant, a.qtetraiter = wqte
+           where a.itmref_0 = wcode_cur2
+             and a.mois = wmois_cur2
+             and a.qte = wqte_cur2
+             and a.rowid = wid;
+          commit;
+          passe := 1;
+        end if;
+        if neg = 1 then
+          wqte := 0;
+          exit;
+        end if;
+        if wcode_cur1 <> wcode_cur2 and passe = 1 then
+          wqte := 0;
+          exit;
+        end if;
+      end loop;
+      close cur2;
+    end loop;
+    close cur1;
+  end;
+
+  update stock_ini_fifo_joint z
+     set z.prixrev = nvl((select sum(montant) /
+                                decode(sum(qtetraiter),
+                                       0,
+                                       9999999999999999,
+                                       sum(qtetraiter))
+                           from synthesefifo_joint zz
+                          where trim(zz.itmref_0) = trim(z.code)),
+                         0);
+  commit;
+  -------------------------------------------------------MP PSF PF
+  execute immediate '  truncate table stock_fin ';
+  execute immediate '  insert into stock_fin 
+select * from
+(
+select   substr(y.itmref_0,1,4)  fam,y.itmref_0 code, i.des1axx_0  libelle,
+sum(y.qtypcu_0) qte,0 CA_NET_HT,0 qtegoutr,sum(y.qtypcu_0) qteori,0 qteval
+
+from stojou y,itmmaster i where y.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' and i.itmref_0=y.itmref_0 and vcrnum_0 not like ''OUT%12U_9%'' and STOFCY_0<>''F'' 
+and (substr(tsicod_1,1,2)<>''AA'' and substr(tsicod_1,1,1)=''A'' 
+or (xdesgrp_0 <> '' '' ) or (y.itmref_0 like ''012-%'' or (i.itmref_0 like ''F%'' and i.TCLCOD_0 = ''MP'') or y.itmref_0 like ''BP%'' or y.itmref_0 like ''BR%'' or y.itmref_0 like ''BF%''  and substr(y.vcrnum_0,1,3)<>''INV'')
+ ) and i.itmref_0 not in (''AV50-XDIVER'',''AV05-XDIVER'') group by y.itmref_0, des1axx_0 order by 1 ) ';
+  execute immediate ' drop table stat_fifo ';
+  execute immediate ' create table Stat_fifo as
+
+select * from 
+
+(
+select pthnum_0,itmref_0,lin,to_char(rcpdat_0,''YYMMDD'') mois,qte qte,(round(prixrev,6)) prixrev from  
+(
+select rr.pthnum_0,rr.rcpdat_0,rr.itmref_0,rr.lin,rr.qtypuu_0 qte,rr.netpri_0,decode(rr.mltcur_0,null,rr.ratcur,rr.mltcur_0) cur,
+decode(rr.xprirev_0,null,decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0)), 
+'''',decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0))
+,0,decode(nvl(rr.priprov,0)+nvl(cpr2,0),null,ratcur*netpri_0,'''',ratcur*netpri_0,0,ratcur*netpri_0,nvl(rr.priprov,0)+nvl(cpr2,0)),rr.xprirev_0) prixrev,
+cpr2 from
+(
+select   p.pthnum_0,p.rcpdat_0,p.itmref_0,p.ptdlin_0 lin,p.itmdes1_0,p.qtypuu_0,(select oo.netpri_0 from porderp oo where oo.pohnum_0=p.pohnum_0 and oo.poplin_0=p.poplin_0 and oo.popseq_0=p.poqseq_0) netpri_0
+,nvl(kk.xprirev_0,(select max(r.xprirev_0) from xgdetpri r,xgdach h where h.xndosprinc_0=r.xdanum_0 and r.itmref_0=p.itmref_0 and h.xdanum_0=p.xdanum_0 )) xprirev_0,kk.mltcur_0
+,(select ii.cpr_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.xdanum_0<>'' '') cpr,
+(select  sum(p2.cpr_0 )
+from preceiptd pa, pinvoiced p1, pinvoiced p2, pinvoice xx
+where pa.pthnum_0=p1.numori_0 and pa.ptdlin_0=p1.linori_0 and pa.itmref_0=p1.itmref_0 and p1.num_0=xx.num_0
+and p1.num_0=p2.numori_0 and p1.pidlin_0=p2.pidlin_0 and pa.pthnum_0=p.pthnum_0 and pa.itmref_0=p.itmref_0) cpr2,
+
+decode((select i.ratmlt_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.xdanum_0<>'' '') , null,
+
+(select distinct chgrat_0 from tabchange where curden_0=''MAD'' and cur_0=(select distinct CUR_0 from preceipt x where x.pthnum_0=p.pthnum_0) 
+and chgtyp_0=1 and chgstrdat_0=(select max(chgstrdat_0) from TABCHANGE where  cur_0 =(select distinct CUR_0 from preceipt x where x.pthnum_0=p.pthnum_0))),
+
+(select i.ratmlt_0 from pinvoice i,pinvoiced ii where i.num_0=ii.num_0 and ii.pthnum_0=p.pthnum_0 and ii.ptdlin_0=p.ptdlin_0 and i.xdanum_0<>'' '')) ratcur 
+
+,(select (sum((c.amtnotlin_0*ee.ratmlt_0 )/(ee.amtnot_0*ee.ratmlt_0)*eg.amtnotlin_0*eeg.ratmlt_0))/c.qtypuu_0
+
+from pinvoiced c , pinvoice ee ,pinvoiced eg,pinvoice eeg
+where ee.num_0=c.num_0 and c.pthnum_0=p.pthnum_0 and c.itmref_0=p.itmref_0 and c.ptdlin_0=p.ptdlin_0 and ee.xdanum_0=eeg.xdanum_0 and eg.num_0=eeg.num_0 and ee.xdanum_0<>'' ''
+group by c.itmref_0,c.qtypuu_0,c.amtnotlin_0,ee.ratmlt_0,ee.amtnot_0) priprov
+
+from preceiptd p,xgpohlin  k ,xgdetpri kk 
+where p.pthnum_0=k.pthnum_0 (+) and p.ptdlin_0=k.ptdlin_0 (+) and p.rcpdat_0  between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and substr(p.bpsnum_0,1,1) between ''0'' and ''1''
+and k.itmref_0=kk.itmref_0 (+) and k.xdanum_0=kk.xdanum_0 (+) and substr(p.itmref_0,1,4) in (select fam from STOCK_FIN)
+)rr
+) 
+group by pthnum_0,itmref_0,lin,to_char(rcpdat_0,''YYMMDD''),qte,prixrev
+
+
+union
+
+(
+select x.pthnum_0,x.itmref_0,ptdlin_0 lin,to_char(x.rcpdat_0,''YYMMDD'') Mois,sum(x.qtypuu_0 ) qte,x.netpri_0 PrixRev
+ from preceiptd x where x.rcpdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || ''' 
+and   substr(x.bpsnum_0,1,1) between ''2'' and ''9'' and substr(x.itmref_0,1,4) in (select fam from STOCK_FIN)
+group by x.pthnum_0,x.itmref_0,ptdlin_0,to_char(x.rcpdat_0,''YYMMDD''),x.netpri_0
+)
+
+union
+
+select x.vcrnum_0,x.itmref_0,vcrlin_0 lin,to_char(x.iptdat_0,''YYMMDD'') Mois,sum(x.qtypcu_0) qte
+,decode(substr(x.vcrnum_0,1,3),''BFM'',round((select ((select sum(qtypcu_0*priord_0) from smvtd d where  vcrlin_0<>1 and d.vcrnum_0=h.vcrnum_0)/qtypcu_0) 
+from smvtd h where h.vcrnum_0=x.vcrnum_0 and h.itmref_0=x.itmref_0 and vcrlin_0=1),4),priord_0) PrixRev
+ from stojou x where substr(x.itmref_0,1,4) in (select fam from STOCK_FIN)
+ and
+ (
+ (
+ substr(x.vcrnum_0,1,3) in (''BFM'',''ATL'',''ENT'',''MTK'') and x.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and x.trstyp_0 in (1,5)
+ )  
+   or 
+   ( (x.vcrnum_0 like ''IN%'' and x.vcrnum_0 not like ''INV%'' or x.vcrnum_0 like ''ESM%'') and x.iptdat_0=''' ||
+                    DATEDEBUT || ''' ) 
+   ) 
+                                                               
+group by x.vcrnum_0,x.itmref_0,vcrlin_0,to_char(x.iptdat_0,''YYMMDD''),x.priord_0 having sum(x.qtypcu_0)>0
+
+) where itmref_0 not in (''AV50-XDIVER'',''AV05-XDIVER'')
+order by 2,3 ';
+  execute immediate ' drop table synthesefifo ';
+  execute immediate ' create table synthesefifo as select itmref_0,mois,prixrev,sum(qte) qte,max(0) montant,max(0) qtetraiter,max(0) prix_rec from stat_fifo group by mois,itmref_0,prixrev ';
+  execute immediate ' drop table stock_ini_fifo ';
+  execute immediate ' create table stock_ini_fifo as select   code , qte stock,0 prixrev  from    stock_fin';
+  execute immediate ' drop table wrelq_espion ';
+  execute immediate ' create table wrelq_espion (des varchar2(50),mnt number(22,2))';
+  commit;
+  declare
+    cursor cur2 is
+      select rowid, t.itmref_0, t.mois, t.prixrev, qte, qtetraiter
+        from synthesefifo t
+       where itmref_0 in (select distinct d1.itmref_0
+                            from itmmaster d1
+                           where d1.TCLCOD_0 = 'MP')
+       order by substr(t.itmref_0, 1, 4), 3 desc;
+    cursor cur1 is
+      select substr(code, 1, 4) code, sum(stock) stock
+        from stock_ini_fifo
+       group by substr(code, 1, 4)
+       order by 1;
+  
+    wcode_cur2  varchar2(60);
+    wmois_cur2  varchar2(6);
+    wprix_cur2  number;
+    wqte_cur2   number;
+    wwprix_sauv number;
+    wcode_cur1  varchar2(60);
+    wqte_cur1   number;
+    wid         varchar2(100);
+    wqte        number;
+  
+    wreliquat      number;
+    wsauv_reliquat number;
+    wmontant       number;
+    passe          integer;
+    neg            integer;
+    wqtetraiter    number(22);
+  begin
+    open cur1;
+    loop
+      open cur2;
+      fetch cur1
+        into wcode_cur1, wqte_cur1;
+      if cur1%notfound then
+        exit;
+      end if;
+      wreliquat      := wqte_cur1;
+      wsauv_reliquat := 0;
+      passe          := 0;
+      neg            := 0;
+      loop
+        fetch cur2
+          into wid,
+               wcode_cur2,
+               wmois_cur2,
+               wprix_cur2,
+               wqte_cur2,
+               wqtetraiter;
+        if cur2%notfound then
+          exit;
+        end if;
+        if wcode_cur1 = substr(wcode_cur2, 1, 4) then
+          wsauv_reliquat := wreliquat;
+          wreliquat      := wreliquat - wqte_cur2;
+          insert into wrelq_espion values ('wreliquat', wreliquat);
+          if wreliquat > 0 then
+            wmontant    := wqte_cur2 * wprix_cur2;
+            wwprix_sauv := wprix_cur2;
+            wqte        := wqte_cur2;
+          elsif wreliquat <= 0 then
+            wmontant := wsauv_reliquat * wprix_cur2;
+            wqte     := wsauv_reliquat;
+            neg      := 1;
+          end if;
+          insert into wrelq_espion values ('wmontant', wmontant);
+          insert into wrelq_espion values ('wqte', wqte);
+          insert into wrelq_espion values ('wprix_cur2', wprix_cur2);
+          update synthesefifo a
+             set a.montant = wmontant, a.qtetraiter = wqte
+           where substr(a.itmref_0, 1, 4) = substr(wcode_cur2, 1, 4)
+             and a.mois = wmois_cur2
+             and a.qte = wqte_cur2
+             and a.rowid = wid;
+          commit;
+          passe := 1;
+        end if;
+        if neg = 1 then
+          wqte := 0;
+          exit;
+        end if;
+        if substr(wcode_cur1, 1, 4) <> substr(wcode_cur2, 1, 4) and
+           passe = 1 then
+          wqte := 0;
+          exit;
+        end if;
+      end loop;
+      close cur2;
+    end loop;
+    close cur1;
+  end;
+  update stock_ini_fifo z
+     set z.prixrev = nvl((select sum(montant) /
+                                decode(sum(qtetraiter),
+                                       0,
+                                       9999999999999999,
+                                       sum(qtetraiter))
+                           from synthesefifo zz
+                          where trim(zz.itmref_0) = trim(z.code)),
+                         der_prix_ini(code));
+
+  -----------
+  commit;
+  execute immediate ' drop table xprixrevartcp';
+  execute immediate ' create table xprixrevartcp as
+select substr(itmref_0,1,4) fam,itmref_0 code,nvl(der_prix_ini(itmref_0),0) prixrev 
+from itmmaster d1 where substr(tsicod_1,1,2)<>''AA'' and substr(tsicod_1,1,1)=''A'' ';
+
+  execute immediate ' drop table stock_val_pf';
+  execute immediate ' create table stock_val_pf as
+select   grp,sgrp,art,des ,poidspf,qteini,prod,stk,(case when stk-prod>0 and prod>0 then prod else stk end ) val
+,vnt,ret
+ from (
+select xdesgrp_0 grp,xdessgrp_0 sgrp,v.itmref_0 art,des1axx_0 des, v.itmwei_0 poidspf
+,nvl((select sum(qtypcu_0) from stojou u where u.itmref_0=v.itmref_0  and (vcrnum_0  like ''INI%'' or vcrnum_0  like ''ESM%'' ) and u.iptdat_0=''' ||
+                    DATEDEBUT ||
+                    ''' ),0) qteini
+,nvl((select qteori from stock_fin where code=v.itmref_0),0) stk
+,nvl((select sum(qtypcu_0)*-1 from stojou d where d.vcrtyp_0=4 and d.vcrnum_0  like ''B%''  and d.vcrnum_0 not like ''V%'' and d.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' and d.itmref_0=v.itmref_0 ),0) vnt
+,nvl((select sum(qtypcu_0) from stojou d where d.vcrtyp_0=13 and d.vcrnum_0  like ''R%''   and d.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' and d.itmref_0=v.itmref_0 ),0) ret
+,nvl((select sum(ss.qtypcu_0) from stojou ss where ss.itmref_0=v.itmref_0  and ss.trstyp_0 in (5,6) and ss.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN || '''),0)prod 
+
+from itmmaster v where v.xdesgrp_0<>'' ''
+group by v.itmref_0 ,xdesgrp_0,xdessgrp_0,des1axx_0 , v.itmwei_0
+)s ';
+
+  update stock_fin s set qteval = qteori;
+  commit;
+  ------------------------------------ 
+  execute immediate ' drop table val_psf_1 ';
+  execute immediate ' create table val_psf_1 as
+ select famd,artc,fam,qtepf qtepsf,poidspf poids,prod,case when prod1=0 then 0 else  (prodmp/prod1)*100 end propo 
+ from ( 
+ select artc,substr(artcp,1,4) fam,prod*poidspf prod1,prod,poidspf,qtepf,famd,-sum(prodmp) prodmp from(
+select   s2.vcrnum_0,s1.itmref_0 artc,s2.itmref_0 artcp
+,nvl((select sum(i.qte) from stock_fin i where i.code=s1.itmref_0),0)  qtepf
+,substr(s1.itmref_0,1,4)   famd 
+,(select xdesgrp_0 from itmmaster i where i.itmref_0=s1.itmref_0) grp
+,nvl((select sum(s.qtypcu_0) from stojou s where s1.itmref_0=s.itmref_0 and  trstyp_0=5 and iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' ),0)prod 
+,(select itmwei_0 from itmmaster i where i.itmref_0=s1.itmref_0) poidspf
+,nvl((select sum(kk.qtypcu_0) from stojou kk where  kk.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' and s2.itmref_0=kk.itmref_0 and kk.vcrnum_0=s2.vcrnum_0 and kk.trstyp_0=6 ),0) prodmp
+from 
+(select * from stojou kk where  kk.iptdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and  kk.trstyp_0=6 ) s2
+,(select * from stojou x where  x.iptdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and x.trstyp_0=5 ) s1
+ where s1.vcrnum_0=s2.vcrnum_0  
+ and substr(s2.itmref_0,1,2) in (select distinct tsicod_1 from itmmaster d1 where substr(s2.itmref_0,1,2)=tsicod_1 and substr(tsicod_1,1,2)<>''AA'' and substr(tsicod_1,1,1)=''A'')
+ group by s1.itmref_0,s2.itmref_0,s2.vcrnum_0
+ )where artc like ''B%'' group by artc,substr(artcp,1,4) ,prod,poidspf,grp,famd,qtepf
+ ) group by famd,artc,fam,prod,prodmp,qtepf,prod1,poidspf ';
+  commit;
+
+  execute immediate ' drop table val_psf ';
+  execute immediate ' create table val_psf as
+select famd,artc itmref_0,(select itmdes1_0 from itmmaster i where i.itmref_0=artc) des,poids,qtepsf,fam,round(( case when propor=0 then 0 else (propo/propor)*100 end),4) propo,prod from (
+ select famd,artc,fam,qtepsf,poids,prod,round(propo,2) propo,(select round(sum(l.propo),2) from val_psf_1 l where l.artc=v.artc group by l.artc) propor 
+ from val_psf_1 v
+ ) ';
+  update stock_fin s
+     set qtegoutr =
+         (select sum(qte) qteg
+            from (select i.code,
+                         sum(i.qteval) / e.xecart_0 qte,
+                         (select max(itmacs_0)
+                            from xitmaccs g, val_psf f
+                           where qtepsf <> 0
+                             and g.itmacs_0 = f.itmref_0
+                             and g.itmref_0 = i.code
+                             and g.itmacs_0 like 'B%') gout
+                    from stock_fin i, itmmaster e
+                   where e.itmref_0 = i.code
+                     and e.xecart_0 <> 0
+                   group by i.code, e.xecart_0, e.itmwei_0) j
+           where j.gout <> ' '
+             and j.gout = s.code
+           group by gout);
+  commit;
+  update stock_fin s
+     set qte = decode(nvl((select (i.qteval *
+                                 (itmwei_0 -
+                                 (1 / e.xecart_0 *
+                                 (select t.itmwei_0
+                                       from itmmaster t
+                                      where itmref_0 in
+                                            (select max(itmacs_0)
+                                               from xitmaccs g, val_psf s
+                                              where qtepsf <> 0
+                                                and g.itmacs_0 = s.itmref_0
+                                                and g.itmref_0 = i.code
+                                                and g.itmacs_0 like 'B%'))))) /
+                                 e.itmwei_0
+                            from stock_fin i, itmmaster e
+                           where s.code = i.code
+                             and e.itmref_0 = i.code
+                             and e.xecart_0 <> 0
+                           group by i.code, i.qteval, itmwei_0, e.xecart_0),
+                          0),
+                      0,
+                      qte,
+                      nvl((select (i.qteval *
+                                 (itmwei_0 -
+                                 (1 / e.xecart_0 *
+                                 (select t.itmwei_0
+                                       from itmmaster t
+                                      where itmref_0 in
+                                            (select max(itmacs_0)
+                                               from xitmaccs g, val_psf s
+                                              where qtepsf <> 0
+                                                and g.itmacs_0 = s.itmref_0
+                                                and g.itmref_0 = i.code
+                                                and g.itmacs_0 like 'B%'))))) /
+                                 e.itmwei_0
+                            from stock_fin i, itmmaster e
+                           where s.code = i.code
+                             and e.itmref_0 = i.code
+                             and e.xecart_0 <> 0
+                           group by i.code, i.qteval, itmwei_0, e.xecart_0),
+                          0))
+  
+   where s.code in
+         (select i.code
+            from stock_fin i, itmmaster e
+           where e.itmref_0 = i.code
+             and e.xecart_0 <> 0
+           group by i.code, i.qte, itmwei_0, e.xecart_0);
+  commit;
+  update stock_fin s
+     set s.qtegoutr =
+         (select (i.qteval - ((i.qteval *
+                 (itmwei_0 -
+                 (1 / e.xecart_0 *
+                 (select t.itmwei_0
+                                    from itmmaster t
+                                   where t.itmref_0 in
+                                         (select max(itmacs_0)
+                                            from xitmaccs g, val_psf s
+                                           where qtepsf <> 0
+                                             and g.itmacs_0 = s.itmref_0
+                                             and g.itmref_0 = i.code
+                                             and g.itmacs_0 like 'B%'))))) /
+                 e.itmwei_0)) * -1
+            from stock_fin i, itmmaster e
+           where s.code = i.code
+             and e.itmref_0 = i.code
+             and e.xecart_0 <> 0
+           group by i.code, i.qteval, itmwei_0, e.xecart_0)
+   where s.code in
+         (select i.code
+            from stock_fin i, itmmaster e
+           where e.itmref_0 = i.code
+             and e.xecart_0 <> 0
+           group by i.code, i.qte, itmwei_0, e.xecart_0);
+  commit;
+
+  update stock_fin s
+     set qte = decode(qtegoutr, null, 0, ' ', 0, qtegoutr) + qteori
+   where qtegoutr is not null;
+  commit;
+
+  execute immediate ' drop table synthesefifo_psf';
+
+  execute immediate ' create table synthesefifo_psf as select * from synthesefifo ';
+
+  declare
+    cursor c1 is
+      select rowid,
+             t.itmref_0,
+             t.mois,
+             t.prixrev,
+             qte,
+             qtetraiter,
+             nvl((select max(fam)
+                   from val_psf f
+                  where fam = substr(t.itmref_0, 1, 4)),
+                 'test') fam
+        from synthesefifo_psf t
+       where substr(itmref_0, 1, 2) in
+             (select distinct tsicod_1
+                from itmmaster d1
+               where substr(tsicod_1, 1, 2) <> 'AA'
+                 and substr(tsicod_1, 1, 1) = 'A')
+       order by substr(t.itmref_0, 1, 2), 3 desc;
+  
+  begin
+    for c in c1 loop
+      if (c.qte - c.qtetraiter > 0) then
+        update synthesefifo_psf f
+           set f.qte        = c.qte - c.qtetraiter,
+               f.qtetraiter = 0,
+               f.montant    = 0
+         where f.itmref_0 = c.itmref_0
+           and f.mois = c.mois
+           and f.rowid = c.rowid;
+      elsif (c.qte - c.qtetraiter = 0) then
+        delete from synthesefifo_psf f
+         where f.itmref_0 = c.itmref_0
+           and f.mois = c.mois
+           and c.qte - c.qtetraiter = 0
+           and c.qte = f.qte;
+      else
+        dbms_output.put_line('null');
+      end if;
+    end loop;
+  end;
+
+  commit;
+  execute immediate ' drop table qte_ini_fifo_psf';
+
+  execute immediate ' create table qte_ini_fifo_psf as 
+ select fam code,(select texte_0 from atextra where codfic_0 like ''ATA%'' and ident1_0=22 and langue_0=''FRA'' and zone_0=''LNGDES'' and ident2_0=fam) famdetail,sum(qtemp) stock from (
+ select distinct fam,((qtepsf*poids*propo)/100) qtemp 
+ from val_psf 
+ )j group by fam ';
+
+  execute immediate ' drop table wrelq_espion_psf ';
+
+  execute immediate ' create table wrelq_espion_psf (des varchar2(50),mnt number(22,2)) ';
+
+  commit;
+  declare
+    cursor cur2 is
+      select rowid, t.itmref_0, t.mois, t.prixrev, qte, qtetraiter
+        from synthesefifo_psf t
+       where substr(itmref_0, 1, 2) in
+             (select distinct tsicod_1
+                from itmmaster d1
+               where substr(tsicod_1, 1, 2) <> 'AA'
+                 and substr(tsicod_1, 1, 1) = 'A')
+       order by substr(t.itmref_0, 1, 4), 3 desc;
+    cursor cur1 is
+      select code, stock from qte_ini_fifo_psf order by 1;
+  
+    wcode_cur2  varchar2(60);
+    wmois_cur2  varchar2(6);
+    wprix_cur2  number;
+    wqte_cur2   number;
+    wwprix_sauv number;
+    wcode_cur1  varchar2(60);
+    wqte_cur1   number;
+    wid         varchar2(100);
+    wqte        number;
+  
+    wreliquat      number;
+    wsauv_reliquat number;
+    wmontant       number;
+    passe          integer;
+    neg            integer;
+    wqtetraiter    number(22);
+  begin
+    open cur1;
+    loop
+      open cur2;
+      fetch cur1
+        into wcode_cur1, wqte_cur1;
+      if cur1%notfound then
+        exit;
+      end if;
+      wreliquat      := wqte_cur1;
+      wsauv_reliquat := 0;
+      passe          := 0;
+      neg            := 0;
+      loop
+        fetch cur2
+          into wid,
+               wcode_cur2,
+               wmois_cur2,
+               wprix_cur2,
+               wqte_cur2,
+               wqtetraiter;
+        if cur2%notfound then
+          exit;
+        end if;
+        if wcode_cur1 = substr(wcode_cur2, 1, 4) then
+          wsauv_reliquat := wreliquat;
+          wreliquat      := wreliquat - wqte_cur2;
+          insert into wrelq_espion_psf values ('wreliquat', wreliquat);
+          if wreliquat > 0 then
+            wmontant    := wqte_cur2 * wprix_cur2;
+            wwprix_sauv := wprix_cur2;
+            wqte        := wqte_cur2;
+          elsif wreliquat <= 0 then
+            wmontant := wsauv_reliquat * wprix_cur2;
+            wqte     := wsauv_reliquat;
+            neg      := 1;
+          end if;
+          insert into wrelq_espion_psf values ('wmontant', wmontant);
+          insert into wrelq_espion_psf values ('wqte', wqte);
+          insert into wrelq_espion_psf values ('wprix_cur2', wprix_cur2);
+          update synthesefifo_psf a
+             set a.montant = wmontant, a.qtetraiter = wqte
+           where substr(a.itmref_0, 1, 4) = substr(wcode_cur2, 1, 4)
+             and a.mois = wmois_cur2
+             and a.qte = wqte_cur2
+             and a.rowid = wid;
+          commit;
+          passe := 1;
+        end if;
+        if neg = 1 then
+          wqte := 0;
+          exit;
+        end if;
+        if substr(wcode_cur1, 1, 4) <> substr(wcode_cur2, 1, 4) and
+           passe = 1 then
+          wqte := 0;
+          exit;
+        end if;
+      end loop;
+      close cur2;
+    end loop;
+    close cur1;
+  end;
+  execute immediate ' drop table val_pf_1 ';
+  execute immediate ' create table val_pf_1 as
+ select famd,artc,fam,qtepf,poidspf,prod,case when prod1=0 then 0 else  (prodmp/prod1)*100 end propo 
+ from ( 
+ select artc,substr(artcp,1,4) fam,prod*poidspf prod1,prod,poidspf,qtepf,famd,-sum(prodmp) prodmp from(
+select   s2.vcrnum_0,s1.itmref_0 artc,s2.itmref_0 artcp
+,nvl((select sum(i.qte) from stock_fin i where i.code=s1.itmref_0),0)  qtepf
+,(select xdessgrp_0 from itmmaster i where i.itmref_0=s1.itmref_0)  famd  
+,(select xdesgrp_0 from itmmaster i where i.itmref_0=s1.itmref_0) grp
+,nvl((select sum(s.qtypcu_0) from stojou s where s1.itmref_0=s.itmref_0 and  trstyp_0=5 and iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''),0)prod 
+,(select itmwei_0 from itmmaster i where i.itmref_0=s1.itmref_0) poidspf
+,nvl((select sum(kk.qtypcu_0) from stojou kk where  kk.iptdat_0 between ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    ''' and s2.itmref_0=kk.itmref_0 and kk.vcrnum_0=s2.vcrnum_0 and kk.trstyp_0=6 ),0) prodmp
+from 
+(select vcrnum_0,itmref_0 from stojou kk where kk.iptdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and  kk.trstyp_0=6 ) s2
+,(select vcrnum_0,itmref_0 from stojou x where x.iptdat_0 between  ''' ||
+                    DATEDEBUT || ''' and ''' || DATEFIN ||
+                    '''  and x.trstyp_0=5 ) s1
+ where s1.vcrnum_0=s2.vcrnum_0 
+ and substr(s2.itmref_0,1,2) in (select distinct tsicod_1 from itmmaster d1 where substr(tsicod_1,1,2)<>''AA'' and substr(tsicod_1,1,1)=''A'')
+ group by s2.vcrnum_0,s1.itmref_0,s2.itmref_0 
+ )where artc not like ''B%''
+ group by artc,substr(artcp,1,4) ,prod,poidspf,grp,famd,qtepf
+ ) group by famd,artc,fam,prod,prodmp,qtepf,prod1,poidspf ';
+  commit;
+  execute immediate ' drop table val_pf ';
+  execute immediate ' create table val_pf as
+select famd,artc,fam,qtepf,poidspf,prod,round(( case when propor=0 then 0 else (propo/propor)*100 end),4) propo from (
+ select famd,artc,fam,qtepf,poidspf,prod,round(propo,4) propo,(select round(sum(l.propo),4) from val_pf_1 l where l.artc=v.artc group by l.artc) propor 
+ from val_pf_1 v
+ )
+union 
+
+select distinct  s1.famd,artc,s2.fam,qtepf,poidspf,prod,nvl(s2.propo,0) propo
+from (
+select xdesgrp_0  famd,itmref_0 artc,nvl((select sum(i.qte) from stock_fin i where i.code=s1.itmref_0),0)  qtepf 
+,itmwei_0  poidspf,nvl((select sum(i.qte) from stock_fin i where i.code=s1.itmref_0),0) prod 
+from itmmaster s1 where itmref_0 in (select art from stock_val_pf where stk>0 and prod=0 and art not in (select artc from val_pf_1 where val_pf_1.prod<>0 ))
+) s1,
+(select distinct  h.ycodfor_0,decode(h.ycodfor_0,''V.11.0004'',''PVC'',''H.80.0001'',''PEHD'',''E.GA.0001'',''PE'',''D.DP.0001'',''DP'',h.ycodfor_0) famd,d.tsicod_0 fam,d.ypropo_0 propo 
+from yformuleh h,yformuled d where  h.ycodfor_0=d.ycodfor_0 and h.ycodfor_0 in (''V.11.0004'',''H.80.0001'',''E.GA.0001'',''D.DP.0001'')) s2
+ where s1.famd=s2.famd  and qtepf<>0 and prod>0 ';
+
+  execute immediate ' drop table synthesefifo_pf ';
+
+  execute immediate ' create table synthesefifo_pf as select * from synthesefifo ';
+
+  commit;
+  declare
+    cursor c1 is
+      select rowid,
+             t.itmref_0,
+             t.mois,
+             t.prixrev,
+             qte,
+             qtetraiter,
+             nvl((select max(fam)
+                   from val_pf f
+                  where fam = substr(t.itmref_0, 1, 4)),
+                 'test') fam,
+             nvl((select sum((qtepf * poidspf * propo) / 100)
+                   from val_pf f
+                  where fam = substr(t.itmref_0, 1, 4)
+                  group by fam),
+                 0) qtetraiter2
+        from synthesefifo_pf t
+       where (substr(itmref_0, 1, 2) in
+             (select distinct tsicod_1
+                 from itmmaster d1
+                where substr(tsicod_1, 1, 2) <> 'AA'
+                  and substr(tsicod_1, 1, 1) = 'A') or
+             substr(itmref_0, 1, 2) in ('11', '10'))
+       order by substr(t.itmref_0, 1, 4), 3 desc;
+  
+  begin
+  
+    for c in c1 loop
+      if (c.qte - c.qtetraiter > 0) then
+        update synthesefifo_pf f
+           set f.qte        = c.qte - c.qtetraiter,
+               f.qtetraiter = 0,
+               f.montant    = 0
+         where f.itmref_0 = c.itmref_0
+           and f.mois = c.mois
+           and f.rowid = c.rowid;
+      elsif (c.qte - c.qtetraiter = 0) then
+        delete synthesefifo_pf f
+         where f.itmref_0 = c.itmref_0
+           and f.mois = c.mois
+           and c.qte - c.qtetraiter = 0
+           and f.qte = c.qte;
+      else
+        dbms_output.put_line('null');
+      end if;
+    end loop;
+  end;
+
+  commit;
+
+  execute immediate ' drop table qte_ini_fifo ';
+
+  execute immediate ' create table qte_ini_fifo as 
+ select fam code,(select texte_0 from atextra where codfic_0 like ''ATA%'' and ident1_0=22 and langue_0=''FRA'' and zone_0=''LNGDES'' and ident2_0=fam) famdetail,sum(qtemp) stock from (
+ select distinct fam,((qtepf*poidspf*propo)/100) qtemp 
+ from val_pf 
+ )j group by fam ';
+  commit;
+
+  ---------
+  execute immediate ' drop table wrelq_espion_pf';
+
+  execute immediate ' create table wrelq_espion_pf (des varchar2(50),mnt number(22,2))';
+
+  declare
+    cursor cur2 is
+      select rowid, t.itmref_0, t.mois, t.prixrev, qte, qtetraiter
+        from synthesefifo_pf t
+       where substr(itmref_0, 1, 2) in
+             (select distinct tsicod_1
+                from itmmaster d1
+               where substr(tsicod_1, 1, 2) <> 'AA'
+                 and substr(tsicod_1, 1, 1) = 'A')
+       order by substr(t.itmref_0, 1, 4), 3 desc;
+    cursor cur1 is
+      select code, stock from qte_ini_fifo order by 1;
+  
+    wcode_cur2  varchar2(60);
+    wmois_cur2  varchar2(6);
+    wprix_cur2  number;
+    wqte_cur2   number;
+    wwprix_sauv number;
+    wcode_cur1  varchar2(60);
+    wqte_cur1   number;
+    wid         varchar2(100);
+    wqte        number;
+  
+    wreliquat      number;
+    wsauv_reliquat number;
+    wmontant       number;
+    passe          integer;
+    neg            integer;
+    wqtetraiter    number(22);
+  begin
+    open cur1;
+    loop
+      open cur2;
+      fetch cur1
+        into wcode_cur1, wqte_cur1;
+      if cur1%notfound then
+        exit;
+      end if;
+      wreliquat      := wqte_cur1;
+      wsauv_reliquat := 0;
+      passe          := 0;
+      neg            := 0;
+      loop
+        fetch cur2
+          into wid,
+               wcode_cur2,
+               wmois_cur2,
+               wprix_cur2,
+               wqte_cur2,
+               wqtetraiter;
+        if cur2%notfound then
+          exit;
+        end if;
+        if wcode_cur1 = substr(wcode_cur2, 1, 4) then
+          wsauv_reliquat := wreliquat;
+          wreliquat      := wreliquat - wqte_cur2;
+          insert into wrelq_espion_pf values ('wreliquat', wreliquat);
+          if wreliquat > 0 then
+            wmontant    := wqte_cur2 * wprix_cur2;
+            wwprix_sauv := wprix_cur2;
+            wqte        := wqte_cur2;
+          elsif wreliquat <= 0 then
+            wmontant := wsauv_reliquat * wprix_cur2;
+            wqte     := wsauv_reliquat;
+            neg      := 1;
+          end if;
+          insert into wrelq_espion_pf values ('wmontant', wmontant);
+          insert into wrelq_espion_pf values ('wqte', wqte);
+          insert into wrelq_espion_pf values ('wprix_cur2', wprix_cur2);
+          update synthesefifo_pf a
+             set a.montant = wmontant, a.qtetraiter = wqte
+           where substr(a.itmref_0, 1, 4) = substr(wcode_cur2, 1, 4)
+             and a.mois = wmois_cur2
+             and a.qte = wqte_cur2
+             and a.rowid = wid;
+          commit;
+          passe := 1;
+        end if;
+        if neg = 1 then
+          wqte := 0;
+          exit;
+        end if;
+        if substr(wcode_cur1, 1, 4) <> substr(wcode_cur2, 1, 4) and
+           passe = 1 then
+          wqte := 0;
+          exit;
+        end if;
+      end loop;
+      close cur2;
+    end loop;
+    close cur1;
+  end;
+
+  commit;
+end;

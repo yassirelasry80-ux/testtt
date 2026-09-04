@@ -1,0 +1,1 @@
+select * from ( select f.bpcnum_0 tiers,initcap(f.bpcnam_0) lib_tiers,f.bpcgru_0 cltgrp,initcap((select y.bpcnam_0 from bpcustomer y where y.bpcnum_0=f.bpcgru_0)) lib_grp_tiers from bpcustomer f where f.bpcsta_0=2 and length(f.bpcnum_0) >= 5 and f.bpcnum_0 not like 'Q%' ) where cltgrp like 'Q%' order by 3,1
