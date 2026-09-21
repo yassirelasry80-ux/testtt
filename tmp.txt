@@ -1,0 +1,180 @@
+Pour traiter un volume important de 4 800 000 lignes (typique de la table STOJOU de Sage X3), la meilleure approche consiste à utiliser une requête SQL en deux étapes (via une CTE - Common Table Expression) :
+
+Agrégation journalière : Sommer les quantités par article et par date à partir du 01/01/2026.
+
+Somme cumulative (Running Total) : Utiliser une fonction de fenêtrage (SUM() OVER) pour calculer le cumul progressif par article au fil des dates.
+
+Voici la requête SQL standard optimisée (adaptée aux noms de champs standards de Sage X3, à ajuster selon votre SGBD : SQL Server, Oracle, ou PostgreSQL) :
+
+Requête SQL
+SQL
+WITH DailyAggregates AS (
+    -- Étape 1 : Agrégation des mouvements par article et par date (à partir du 01/01/2026)
+    SELECT 
+        ITMREF_0 AS Article,          -- Code article (Sage X3)
+        CAST(IPTDAT_0 AS DATE) AS DateMouvement, -- Date du mouvement
+        SUM(QTYSTU_0) AS QteJour        -- Quantité journalière (Unité de Stock)
+    FROM 
+        STOJOU
+    WHERE 
+        IPTDAT_0 >= '2026-01-01'        -- Filtrage strict à partir du 01/01/2026
+    GROUP BY 
+        ITMREF_0, 
+        CAST(IPTDAT_0 AS DATE)
+)
+-- Étape 2 : Calcul du cumul par article trié par date
+SELECT 
+    Article,
+    DateMouvement,
+    QteJour,
+    SUM(QteJour) OVER (
+        PARTITION BY Article 
+        ORDER BY DateMouvement 
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS QuantiteCumulative
+FROM 
+    DailyAggregates
+ORDER BY 
+    Article, 
+    DateMouvement;
+💡 Conseils d'optimisation pour de grands volumes (4.8M lignes)
+Compte tenu de la volumétrie historique de la table STOJOU :
+
+Indexation indispensable : Assurez-vous qu'un index existe sur les colonnes IPTDAT_0 (Date du mouvement) et ITMREF_0 (Article) pour éviter un Table Scan complet qui ralentirait l'exécution.
+
+Persistance (Table de stockage) : Si cette table doit être consultée fréquemment par des utilisateurs ou des tableaux de bord (ex: Qlik Sense), ne calculez pas cette requête à la volée. Stockez le résultat dans une Table de Résultats (ou Vue Matérialisée) via une procédure stockée exécutée lors de vos charges ETL nocturnes.
+
+Gestion du Stock Initial (Optionnel) : Si le cumul au 01/01/2026 doit inclure le stock existant avant cette date, il faudrait idéalement intégrer le solde de clôture au 31/12/2025 comme ligne de départ (point d'ancrage) pour chaque article avant d'appliquer la fonction de fenêtrage.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- =====================================================================
+-- Stock cumulé par article et par date - Sage X3 (STOJOU) / Oracle 11g
+-- =====================================================================
+-- Hypothèses (à adapter) :
+--   * Schéma X3          : SEED  (remplacer par votre schéma/dossier)
+--   * ITMREF_0           : code article
+--   * IPTDAT_0           : date du mouvement
+--   * QTYSTU_0           : quantité en unité de stock, SIGNÉE (entrées > 0, sorties < 0)
+--   * Tous sites/lots/emplacements confondus (agrégation par article seul)
+--   * "DATE" étant un mot réservé Oracle, la colonne est nommée DATE_MVT
+--   * Date de début      : 01/01/2026 (à modifier aux 2 endroits si besoin)
+-- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- VERSION 1 : une ligne par (article, date AVEC mouvement) >= 01/01/2026
+--   -> 1 seul passage sur STOJOU
+--   -> tout l'historique < 01/01/2026 est écrasé sur une date "sentinelle"
+--      (01/01/1900) qui sert de solde d'ouverture dans le cumul,
+--      puis est retirée du résultat final.
+-- ---------------------------------------------------------------------
+CREATE TABLE STOCK_CUMUL_2026
+NOLOGGING
+PARALLEL 4
+AS
+SELECT DATE_MVT,
+       ARTICLE,
+       QUANTITE
+FROM (
+    SELECT DT  AS DATE_MVT,
+           ARTICLE,
+           SUM(QTE) OVER (PARTITION BY ARTICLE
+                          ORDER BY DT
+                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS QUANTITE
+    FROM (
+        SELECT ARTICLE,
+               DT,
+               SUM(QTYSTU_0) AS QTE
+        FROM (
+            SELECT /*+ PARALLEL(s 4) */
+                   s.ITMREF_0 AS ARTICLE,
+                   CASE WHEN s.IPTDAT_0 < DATE '2026-01-01'
+                        THEN DATE '1900-01-01'      -- solde d'ouverture
+                        ELSE s.IPTDAT_0
+                   END        AS DT,
+                   s.QTYSTU_0
+            FROM   SEED.STOJOU s
+        )
+        GROUP BY ARTICLE, DT
+    )
+)
+WHERE DATE_MVT >= DATE '2026-01-01';   -- retire la ligne sentinelle APRÈS le cumul
+
+
+-- ---------------------------------------------------------------------
+-- VERSION 2 (optionnelle) : calendrier complet
+--   Une ligne par (article, jour) du 01/01/2026 à aujourd'hui, même sans
+--   mouvement ce jour-là (le stock est reporté).
+--   Attention au volume : nb articles x nb jours.
+-- ---------------------------------------------------------------------
+CREATE TABLE STOCK_CUMUL_2026_JOURNALIER
+NOLOGGING
+PARALLEL 4
+AS
+WITH cal AS (
+    SELECT DATE '2026-01-01' + LEVEL - 1 AS DT
+    FROM   dual
+    CONNECT BY LEVEL <= TRUNC(SYSDATE) - DATE '2026-01-01' + 1
+),
+mvt AS (
+    SELECT ARTICLE,
+           DT,
+           SUM(QTYSTU_0) AS QTE
+    FROM (
+        SELECT /*+ PARALLEL(s 4) */
+               s.ITMREF_0 AS ARTICLE,
+               GREATEST(s.IPTDAT_0, DATE '2026-01-01') AS DT,  -- historique => 01/01/2026
+               s.QTYSTU_0
+        FROM   SEED.STOJOU s
+    )
+    GROUP BY ARTICLE, DT
+)
+SELECT c.DT AS DATE_MVT,
+       m.ARTICLE,
+       SUM(NVL(m.QTE, 0)) OVER (PARTITION BY m.ARTICLE
+                                ORDER BY c.DT
+                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS QUANTITE
+FROM   mvt m PARTITION BY (m.ARTICLE)      -- partition outer join : densification
+       RIGHT OUTER JOIN cal c
+       ON (c.DT = m.DT);
+
+
+-- ---------------------------------------------------------------------
+-- Post-traitement
+-- ---------------------------------------------------------------------
+CREATE INDEX IDX_STOCK_CUMUL_2026 ON STOCK_CUMUL_2026 (ARTICLE, DATE_MVT) NOLOGGING PARALLEL 4;
+
+ALTER TABLE STOCK_CUMUL_2026 NOPARALLEL;
+ALTER INDEX IDX_STOCK_CUMUL_2026 NOPARALLEL;
+
+BEGIN
+  DBMS_STATS.GATHER_TABLE_STATS(ownname => USER,
+                                tabname => 'STOCK_CUMUL_2026',
+                                cascade => TRUE,
+                                degree  => 4);
+END;
+/
+
+
+-- ---------------------------------------------------------------------
+-- (Optionnel) Index couvrant pour accélérer la lecture de STOJOU.
+-- STOJOU est une table très large : un index étroit permet un
+-- INDEX FAST FULL SCAN à la place d'un TABLE FULL SCAN.
+-- À valider avec votre administrateur X3 (index hors dictionnaire X3).
+-- ---------------------------------------------------------------------
+-- CREATE INDEX SEED.IDX_STOJOU_CUMUL
+--   ON SEED.STOJOU (ITMREF_0, IPTDAT_0, QTYSTU_0) NOLOGGING PARALLEL 4;
