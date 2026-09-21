@@ -178,3 +178,39 @@ END;
 -- ---------------------------------------------------------------------
 -- CREATE INDEX SEED.IDX_STOJOU_CUMUL
 --   ON SEED.STOJOU (ITMREF_0, IPTDAT_0, QTYSTU_0) NOLOGGING PARALLEL 4;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+J'ai compris que vous ne voulez plus du solde d'ouverture : on ignore tout l'historique avant le 01/01/2026 et on cumule uniquement à partir de cette date. Le traitement devient beaucoup plus léger.
+
+sql
+CREATE TABLE STOCK_CUMUL_2026 NOLOGGING AS
+SELECT ITMREF_0 AS ARTICLE,
+       IPTDAT_0 AS DATE_MVT,
+       SUM(SUM(QTYSTU_0)) OVER (PARTITION BY ITMREF_0
+                                ORDER BY IPTDAT_0
+                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS QUANTITE
+FROM   SEED.STOJOU
+WHERE  IPTDAT_0 >= DATE '2026-01-01'
+GROUP  BY ITMREF_0, IPTDAT_0;
+Le WHERE élimine tout l'historique avant 2026, donc seules les lignes de 2026 sont lues et traitées.
+Si un index existe sur IPTDAT_0, Oracle peut l'utiliser. Sinon, c'est un full scan, mais il n'y a plus de tri ni de regroupement sur les 4,8 M de lignes.
+SUM(SUM(...)) OVER (...) cumule directement les totaux journaliers par article, sans sous-requête.
+Le résultat est une ligne par article et par date avec mouvement.
+
+La QUANTITE obtenue est le cumul des mouvements depuis le 01/01/2026, et non le stock réel, puisque le solde d'ouverture est exclu. Si vous voulez ajouter le solde plus tard, il suffira de le joindre par article.
+
+Le nom de schéma SEED et les colonnes ITMREF_0, IPTDAT_0 et QTYSTU_0 sont à adapter à votre environnement.
