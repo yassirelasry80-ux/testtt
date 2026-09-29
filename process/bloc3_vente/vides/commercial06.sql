@@ -1,1 +1,0 @@
-select kk.bpr_0 tiers,kk.accdat_0 periode, substr(kk.bpr_0,2,1) categ,decode(substr(kk.bpr_0,1,1),'X','C','Y','C','Z','C',substr(kk.bpr_0,1,1)) agence,kk.amtnot_0 HT,kk.amtati_0 TTC  from sinvoice kk where kk.accdat_0 between '01/01/2017' and '31/12/2026' and kk.num_0 like 'AF%'

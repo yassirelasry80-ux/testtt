@@ -1,1 +1,0 @@
-select a.num_0,a.bpr_0,a.accdat_0,decode(a.gte_0,'AVC',a.amtnot_0*-1,a.amtnot_0) ht,decode(a.gte_0,'AVC',a.amtati_0*-1,a.amtati_0) ttc,decode(a.gte_0,'AVC',(a.amtati_0-a.amtnot_0)*-1,(a.amtati_0-a.amtnot_0)) tva from sinvoice a where a.accdat_0 > '01/01/2010' and a.amtnot_0 > 0 and a.sta_0<>3

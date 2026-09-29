@@ -1,1 +1,0 @@
-select distinct vcrnum_0,trstyp_0,decode(trstyp_0,5,'qtefabacompose',6,'qtefabacomposant') typ,iptdat_0 date_, itmref_0,(select des1axx_0 from itmmaster m where m.itmref_0=ss.itmref_0) des,sum(qtypcu_0) qte ,pcu_0 unitstk from stojou ss where iptdat_0 between  '01/01/2024' and '31/12/2026' and vcrnumori_0 like 'OF%' group by vcrnum_0,trstyp_0,iptdat_0 , itmref_0 ,pcu_0 

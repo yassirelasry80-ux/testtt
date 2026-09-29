@@ -1,1 +1,0 @@
-select a1.code_0 FT,a2.texte_0 lib_FT from atabdiv a1,atextra a2 where a1.numtab_0='21' and a2.codfic_0='ATABDIV' and a2.ident1_0=21 and a2.zone_0='LNGDES' and a2.ident2_0=a1.code_0

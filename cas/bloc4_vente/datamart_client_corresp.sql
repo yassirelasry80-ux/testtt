@@ -1,1 +1,0 @@
-select t.bpcnum_0,t.BPCNAM_0,t.BCGCOD_0,t.rep_0,t.YANCCOD_0,t.YANCPT_0,t.YSITE_0,YSAUV_CLT_0 from bpcustomer t where length(t.bpcnum_0) > 5
