@@ -1,0 +1,49 @@
+groups:
+
+  - name: impayes_service
+    rules:
+
+      - alert: ImpayesSyncServiceDown
+        expr: up{job="impayes"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: impayes
+        annotations:
+          summary: "Service impayes inaccessible"
+          description: >
+            Le service impayes n'est plus scrapeable par Prometheus depuis 5 minutes.
+            Le process Python est probablement arrêté ou le port 8000 inaccessible.
+
+
+
+  - name: impayes_failures
+    rules:
+
+      - alert: ImpayesConsecutiveFailures
+        expr: >
+          increase(impayes_sync_cycles_total{status="failure"}[10m]) >= 2
+          and on()
+          (
+            (
+              (day_of_week() >= 1 and day_of_week() <= 5)
+              and (hour() >= 7 and hour() < 18)
+            )
+            or
+            (
+              day_of_week() == 6
+              and (hour() >= 7 and hour() < 12)
+            )
+          )
+        for: 5m
+        labels:
+          severity: critical
+          service: impayes
+        annotations:
+          summary: "2 échecs consécutifs détectés en 10 minutes"
+          description: >
+            Au moins 2 cycles ont échoué dans les 10 dernières minutes pendant les heures de travail.
+            Cause probable : timeout réseau, connexion DB impossible, erreur d'extraction,
+            de centralisation ou de dispatching.
+
+
