@@ -134,7 +134,7 @@ def get_max_sync_date(target):
             cursor.close()
             return None, True
 
-        max_query = f"SELECT MAX(SYNC_DATE) FROM {target['table']}"
+        max_query = f"SELECT MAX(SYN_DATE_0) FROM {target['table']}"
         cursor.execute(max_query)
         max_date = cursor.fetchone()[0]
         cursor.close()
@@ -149,26 +149,42 @@ def get_max_sync_date(target):
             conn.close()
 
 
+def _clean_local_dispatch_df(df):
+    """
+    Remplace les valeurs NULL/NaN par '' pour les colonnes texte/alphanumériques
+    afin de respecter les contraintes (NOT NULL) des tables locales XIMPAYEC.
+    """
+    df_clean = df.copy()
+    exclude_cols = {'ACCDAT_0', 'MNTGLB_0', 'MNTREG_0', 'SYNC_DATE', 'SYN_DATE_0'}
+    for col in df_clean.columns:
+        if col not in exclude_cols:
+            df_clean[col] = df_clean[col].apply(lambda x: '' if (x is None or pd.isna(x)) else str(x))
+
+    df_clean = df_clean.astype(object).where(pd.notnull(df_clean), None)
+    return df_clean
+
+
 def do_initial_dispatch(target, df_data):
     """
     Bulk insert all data into an empty local schema.
     """
     schema = target['schema']
     print(f"[{schema}] Running Initial Dispatch ({len(df_data)} rows)...")
-    df_data = df_data.where(pd.notnull(df_data), None)
+    df_data = _clean_local_dispatch_df(df_data)
 
     insert_sql = f"""
         INSERT INTO {target['table']} (
             ACCDAT_0, BPR_0, NOMCLT_0, NUM_0, MNTGLB_0, 
             MNTREG_0, BPCGRU_0, DES_0, MOTIF_0, BANQUE_0, 
-            REP_0, EMAIL_0, DOSSIER_0, SYNC_DATE
+            REP_0, EMAIL_0, DOSSIER_0, SYN_DATE_0
         ) VALUES (
             :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14
         )
     """
+    sync_col = 'SYN_DATE_0' if 'SYN_DATE_0' in df_data.columns else 'SYNC_DATE'
     ordered_cols = ['ACCDAT_0', 'BPR_0', 'NOMCLT_0', 'NUM_0', 'MNTGLB_0',
                     'MNTREG_0', 'BPCGRU_0', 'DES_0', 'MOTIF_0', 'BANQUE_0',
-                    'REP_0', 'EMAIL_0', 'DOSSIER_0', 'SYNC_DATE']
+                    'REP_0', 'EMAIL_0', 'DOSSIER_0', sync_col]
     data_to_insert = df_data[ordered_cols].values.tolist()
 
     conn = None
@@ -228,19 +244,20 @@ def do_differential_dispatch(target, df_delta):
         # inserts
         if not df_insert.empty:
             print(f"[{schema}] Dispatching - Operation: INSERT ({len(df_insert)} lignes)")
-            df_insert = df_insert.where(pd.notnull(df_insert), None)
+            df_insert = _clean_local_dispatch_df(df_insert)
             insert_sql = f"""
                 INSERT INTO {target['table']} (
                     ACCDAT_0, BPR_0, NOMCLT_0, NUM_0, MNTGLB_0, 
                     MNTREG_0, BPCGRU_0, DES_0, MOTIF_0, BANQUE_0, 
-                    REP_0, EMAIL_0, DOSSIER_0, SYNC_DATE
+                    REP_0, EMAIL_0, DOSSIER_0, SYN_DATE_0
                 ) VALUES (
                     :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14
                 )
             """
+            sync_col = 'SYN_DATE_0' if 'SYN_DATE_0' in df_insert.columns else 'SYNC_DATE'
             ordered_cols = ['ACCDAT_0', 'BPR_0', 'NOMCLT_0', 'NUM_0', 'MNTGLB_0',
                             'MNTREG_0', 'BPCGRU_0', 'DES_0', 'MOTIF_0', 'BANQUE_0',
-                            'REP_0', 'EMAIL_0', 'DOSSIER_0', 'SYNC_DATE']
+                            'REP_0', 'EMAIL_0', 'DOSSIER_0', sync_col]
             data_to_insert = df_insert[ordered_cols].values.tolist()
             inserted = _execute_batch_with_retry(
                 conn, insert_sql, data_to_insert,
@@ -252,13 +269,14 @@ def do_differential_dispatch(target, df_delta):
         # updates
         if not df_update.empty:
             print(f"[{schema}] Dispatching - Operation: UPDATE ({len(df_update)} lignes)")
-            df_update = df_update.where(pd.notnull(df_update), None)
+            df_update = df_update.astype(object).where(pd.notnull(df_update), None)
             update_sql = f"""
                 UPDATE {target['table']}
-                SET MNTREG_0 = :1, SYNC_DATE = :2
+                SET MNTREG_0 = :1, SYN_DATE_0 = :2
                 WHERE NUM_0 = :3 AND DOSSIER_0 = :4
             """
-            data_to_update = df_update[['MNTREG_0', 'SYNC_DATE', 'NUM_0', 'DOSSIER_0']].values.tolist()
+            sync_col = 'SYN_DATE_0' if 'SYN_DATE_0' in df_update.columns else 'SYNC_DATE'
+            data_to_update = df_update[['MNTREG_0', sync_col, 'NUM_0', 'DOSSIER_0']].values.tolist()
             updated = _execute_batch_with_retry(
                 conn, update_sql, data_to_update,
                 label="Delta UPDATE",
