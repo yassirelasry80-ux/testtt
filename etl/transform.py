@@ -50,8 +50,8 @@ def standardize_balance_df(df: pd.DataFrame, default_source: str = None) -> pd.D
     df_out["COMPTE"] = df_out["COMPTE"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
     df_out["SENS"] = pd.to_numeric(df_out["SENS"], errors="coerce").fillna(1).astype(int)
     
-    # Montant : toujours positif et arrondi à 2 décimales
-    df_out["MONTANT"] = pd.to_numeric(df_out["MONTANT"], errors="coerce").fillna(0.0).abs().round(2)
+    # Montant : arrondi à 2 décimales (conserve le signe réel de correction)
+    df_out["MONTANT"] = pd.to_numeric(df_out["MONTANT"], errors="coerce").fillna(0.0).round(2)
 
     # Date comptable
     df_out["DATE_COMPTABLE"] = pd.to_datetime(df_out["DATE_COMPTABLE"], errors="coerce")
@@ -226,7 +226,7 @@ def _make_row(
         "AXE_ENTITE": axe_entite,
         "AXE_BLINE": axe_bline,
         "AXE_SITE": axe_site,
-        "MONTANT": abs(montant),
+        "MONTANT": round(float(montant), 2),
         "TIERS_CODE": None,
         "ARTICLE_CODE": None,
         "DATE_COMPTABLE": date_comptable,

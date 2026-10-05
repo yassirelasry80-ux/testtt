@@ -51,14 +51,14 @@ def _clean_int(val, default: int = 1) -> int:
 
 
 def _clean_float(val, default: float = 0.0) -> float:
-    """Convertit en float Python natif positif (arrondi à 2 décimales)."""
+    """Convertit en float Python natif (arrondi à 2 décimales, conserve le signe)."""
     if val is None:
         return default
     try:
         f = float(val)
         if math.isnan(f) or math.isinf(f):
             return default
-        return round(abs(f), 2)
+        return round(f, 2)
     except (ValueError, TypeError):
         return default
 
