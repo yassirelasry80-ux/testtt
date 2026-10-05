@@ -101,3 +101,21 @@ def extract_commercial06_af(config: AppConfig) -> pd.DataFrame:
 
 def extract_datamart_analytique(config: AppConfig) -> pd.DataFrame:
     return _extract_oracle(config.bi_oracle, "extract_datamart_analytique.sql", _get_start_date(config), config.entite_name, "Datamart Analytique")
+
+
+# ── 9. Moovapps (Oracle) ──
+def extract_moovapps(config: AppConfig) -> pd.DataFrame:
+    """Extrait les données depuis la base Oracle Moovapps."""
+    if not config.moovapps_oracle.host or not config.moovapps_oracle.user:
+        logger.warning(
+            f"[{config.entite_name}] Moovapps Oracle non configuré (host ou user manquant dans .env). Extraction ignorée."
+        )
+        return pd.DataFrame()
+    return _extract_oracle(
+        config.moovapps_oracle,
+        "extract_moovapps.sql",
+        _get_start_date(config),
+        config.entite_name,
+        "Moovapps",
+    )
+

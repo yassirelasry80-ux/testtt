@@ -32,6 +32,7 @@ class AppConfig:
     x3_oracle: DbConfig
     agirh_sqlserver: DbConfig
     bi_oracle: DbConfig
+    moovapps_oracle: DbConfig
 
 
 def get_entities_list(env_path: str = ".env") -> List[str]:
@@ -55,6 +56,20 @@ def _oracle_db(prefix: str, role: str) -> DbConfig:
     )
 
 
+def _oracle_moovapps_db(prefix: str) -> DbConfig:
+    """Helper pour instancier la configuration Oracle Moovapps (par entité ou fallback générique)."""
+    p = f"{prefix}_DB_MOOVAPPS"
+    p_alt = f"{prefix}_MOOVAPPS_DB"
+    f = "MOOVAPPS_DB"
+    return DbConfig(
+        host=os.getenv(f"{p}_HOST") or os.getenv(f"{p_alt}_HOST") or os.getenv(f"{f}_HOST", ""),
+        port=int(os.getenv(f"{p}_PORT") or os.getenv(f"{p_alt}_PORT") or os.getenv(f"{f}_PORT", "1521")),
+        service_name=os.getenv(f"{p}_SERVICE") or os.getenv(f"{p_alt}_SERVICE") or os.getenv(f"{f}_SERVICE", "ERPV6"),
+        user=os.getenv(f"{p}_USER") or os.getenv(f"{p_alt}_USER") or os.getenv(f"{f}_USER", ""),
+        password=os.getenv(f"{p}_PASSWORD") or os.getenv(f"{p_alt}_PASSWORD") or os.getenv(f"{f}_PASSWORD", ""),
+    )
+
+
 def load_config(env_path: str = ".env", entite_name: str = None) -> AppConfig:
     """Charge la configuration pour l'entité choisie depuis le fichier .env."""
     p = Path(env_path)
@@ -72,6 +87,7 @@ def load_config(env_path: str = ".env", entite_name: str = None) -> AppConfig:
         start_date=os.getenv("START_DATE", "01/01/2026").strip(),
         x3_oracle=_oracle_db(prefix, "SOURCE"),
         bi_oracle=_oracle_db(prefix, "TARGET"),
+        moovapps_oracle=_oracle_moovapps_db(prefix),
         agirh_sqlserver=DbConfig(
             host=os.getenv("AGIRH_SQLSERVER_HOST", ""),
             port=int(os.getenv("AGIRH_SQLSERVER_PORT", "1433")),

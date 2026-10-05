@@ -30,6 +30,7 @@ FLUX_STANDARDS = [
     (ext.extract_commercial04_remise, "COMMERCIAL04", "Remises de pied (Sage X3)"),
     (ext.extract_commercial06_af, "COMMERCIAL06", "Avoirs Financiers AF (Sage X3)"),
     # (ext.extract_datamart_analytique, "DATAMART_ANALYTIQUE", "Grand Livre (Oracle BI)"),
+    (ext.extract_moovapps, "MOOVAPPS", "Moovapps (Oracle)"),
 ]
 
 
