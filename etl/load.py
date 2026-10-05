@@ -8,9 +8,9 @@ Modes de chargement :
 
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, date
 import pandas as pd
-import numpy as np
+import oracledb
 from etl.config import AppConfig
 from etl.connections import oracle_connection
 
@@ -23,91 +23,109 @@ COLUMNS_ORDER = [
     "DATE_COMPTABLE", "SOURCE", "TYPE_LIGNE",
 ]
 
-# Mapping colonne → type Oracle attendu (pour le cast Python)
-# 'str' = VARCHAR2, 'int' = NUMBER entier, 'float' = NUMBER décimal, 'date' = DATE
-COLUMN_TYPES = {
-    "NUM_PIECE":      "str",
-    "COMPTE":         "str",
-    "SENS":           "int",
-    "AXE_CENTRE":     "str",
-    "AXE_ENTITE":     "str",
-    "AXE_BLINE":      "str",
-    "AXE_SITE":       "str",
-    "MONTANT":        "float",
-    "TIERS_CODE":     "str",
-    "ARTICLE_CODE":   "str",
-    "DATE_COMPTABLE": "date",
-    "SOURCE":         "str",
-    "TYPE_LIGNE":     "str",
-}
-
 BATCH_SIZE = 1000
 
 
-def _is_null(val) -> bool:
-    """Vérifie si une valeur est considérée comme NULL pour Oracle."""
+def _clean_str(val):
+    """Convertit en str propre ou None si vide/null/NaN."""
     if val is None:
-        return True
+        return None
     if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-        return True
-    if isinstance(val, str) and val.strip().lower() in ("", "none", "nan", "nat"):
-        return True
+        return None
+    s = str(val).strip()
+    if s.lower() in ("", "none", "nan", "nat", "<na>"):
+        return None
+    return s
+
+
+def _clean_int(val, default: int = 1) -> int:
+    """Convertit en int Python natif."""
+    if val is None:
+        return default
     try:
-        if pd.isna(val):
-            return True
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return default
+        return int(float(val))
     except (ValueError, TypeError):
-        pass
-    return False
+        return default
 
 
-def _cast_value(val, target_type: str):
-    """
-    Convertit une valeur Python vers le type natif attendu par Oracle.
-    Retourne None pour les valeurs NULL.
-    """
-    if _is_null(val):
+def _clean_float(val, default: float = 0.0) -> float:
+    """Convertit en float Python natif positif (arrondi à 2 décimales)."""
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return round(abs(f), 2)
+    except (ValueError, TypeError):
+        return default
+
+
+def _clean_date(val):
+    """Convertit en datetime.datetime Python natif."""
+    if val is None:
+        return None
+    if isinstance(val, pd.Timestamp):
+        if pd.isna(val):
+            return None
+        return val.to_pydatetime()
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, date):
+        return datetime(val.year, val.month, val.day)
+    try:
+        dt = pd.to_datetime(val)
+        if pd.isna(dt):
+            return None
+        return dt.to_pydatetime()
+    except Exception:
         return None
 
-    if target_type == "str":
-        return str(val).strip()
 
-    elif target_type == "int":
-        try:
-            return int(float(val))
-        except (ValueError, TypeError):
-            return None
-
-    elif target_type == "float":
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return None
-
-    elif target_type == "date":
-        if isinstance(val, datetime):
-            return val
-        if isinstance(val, pd.Timestamp):
-            return val.to_pydatetime()
-        try:
-            return pd.to_datetime(val).to_pydatetime()
-        except Exception:
-            return None
-
-    return val
-
-
-def _sanitize_rows(df: pd.DataFrame) -> list:
+def sanitize_dataframe_for_oracle(df: pd.DataFrame) -> list:
     """
-    Convertit le DataFrame en liste de listes avec les types Python natifs
-    correspondant aux colonnes Oracle cibles. Élimine les NaN/NaT parasites.
+    Transforme un DataFrame en liste de listes avec des types Python natifs purs.
+    Garantit l'absence de np.nan, float('nan'), pd.Timestamp ou str invalides.
     """
-    col_types = [COLUMN_TYPES[col] for col in COLUMNS_ORDER]
     rows = []
-    for _, row in df.iterrows():
-        sanitized = []
-        for i, col in enumerate(COLUMNS_ORDER):
-            sanitized.append(_cast_value(row[col], col_types[i]))
-        rows.append(sanitized)
+    # Index des colonnes dans COLUMNS_ORDER
+    # 0: NUM_PIECE (str)
+    # 1: COMPTE (str)
+    # 2: SENS (int)
+    # 3: AXE_CENTRE (str)
+    # 4: AXE_ENTITE (str)
+    # 5: AXE_BLINE (str)
+    # 6: AXE_SITE (str)
+    # 7: MONTANT (float)
+    # 8: TIERS_CODE (str)
+    # 9: ARTICLE_CODE (str)
+    # 10: DATE_COMPTABLE (datetime)
+    # 11: SOURCE (str)
+    # 12: TYPE_LIGNE (str)
+
+    # Récupération sous forme de tuples pour une performance maximale
+    raw_tuples = df[COLUMNS_ORDER].itertuples(index=False, name=None)
+
+    for r in raw_tuples:
+        clean_row = [
+            _clean_str(r[0]),                                  # NUM_PIECE
+            _clean_str(r[1]),                                  # COMPTE
+            _clean_int(r[2], default=1),                       # SENS
+            _clean_str(r[3]),                                  # AXE_CENTRE
+            _clean_str(r[4]),                                  # AXE_ENTITE
+            _clean_str(r[5]),                                  # AXE_BLINE
+            _clean_str(r[6]),                                  # AXE_SITE
+            _clean_float(r[7]),                                # MONTANT
+            _clean_str(r[8]),                                  # TIERS_CODE
+            _clean_str(r[9]),                                  # ARTICLE_CODE
+            _clean_date(r[10]),                                # DATE_COMPTABLE
+            _clean_str(r[11]) or "INCONNU",                    # SOURCE
+            _clean_str(r[12]) or "DETAIL",                     # TYPE_LIGNE
+        ]
+        rows.append(clean_row)
+
     return rows
 
 
@@ -136,20 +154,32 @@ def load(
     schema = f"bi_{config.entite_name.lower()}"
     table = f"{schema}.balance_analytique"
 
-    # Préparation des données
-    df_load = df[COLUMNS_ORDER].copy()
-    df_load["COMPTE"] = df_load["COMPTE"].astype(str).str.strip()
-    df_load["DATE_COMPTABLE"] = pd.to_datetime(df_load["DATE_COMPTABLE"])
-
     start_date = config.start_date
     if isinstance(start_date, str):
         start_date = datetime.strptime(start_date[:10], "%d/%m/%Y")
 
-    # Conversion en types Python natifs (fix DPY-3013)
-    rows = _sanitize_rows(df_load)
+    # Assainissement strict des types Python natifs (résout les erreurs DPY-3013)
+    rows = sanitize_dataframe_for_oracle(df)
 
     with oracle_connection(config.bi_oracle) as conn:
         cursor = conn.cursor()
+
+        # Définition explicite des types de bind pour Oracle (garantit le mapping exact)
+        cursor.setinputsizes(
+            oracledb.DB_TYPE_VARCHAR,  # 1. NUM_PIECE
+            oracledb.DB_TYPE_VARCHAR,  # 2. COMPTE
+            oracledb.DB_TYPE_NUMBER,   # 3. SENS
+            oracledb.DB_TYPE_VARCHAR,  # 4. AXE_CENTRE
+            oracledb.DB_TYPE_VARCHAR,  # 5. AXE_ENTITE
+            oracledb.DB_TYPE_VARCHAR,  # 6. AXE_BLINE
+            oracledb.DB_TYPE_VARCHAR,  # 7. AXE_SITE
+            oracledb.DB_TYPE_NUMBER,   # 8. MONTANT
+            oracledb.DB_TYPE_VARCHAR,  # 9. TIERS_CODE
+            oracledb.DB_TYPE_VARCHAR,  # 10. ARTICLE_CODE
+            oracledb.DB_TYPE_DATE,     # 11. DATE_COMPTABLE
+            oracledb.DB_TYPE_VARCHAR,  # 12. SOURCE
+            oracledb.DB_TYPE_VARCHAR,  # 13. TYPE_LIGNE
+        )
 
         # ── 1. PURGE PRÉALABLE ──
         if mode == "truncate":
@@ -157,8 +187,7 @@ def load(
             cursor.execute(f"TRUNCATE TABLE {table}")
 
         elif mode == "delete_insert":
-            # Si source_name n'est pas spécifié, purger pour toutes les sources du DataFrame
-            sources_to_delete = [source_name] if source_name else df_load["SOURCE"].dropna().unique().tolist()
+            sources_to_delete = [source_name] if source_name else list({r[11] for r in rows if r[11]})
             for src in sources_to_delete:
                 delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1 AND DATE_COMPTABLE >= :2"
                 cursor.execute(delete_sql, [src, start_date])

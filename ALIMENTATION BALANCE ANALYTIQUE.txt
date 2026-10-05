@@ -1,0 +1,319 @@
+COMMERCIAL02
+INSERT INTO balance_analytique (
+    NUM_PIECE,
+    COMPTE,
+    SENS,
+    AXE_CENTRE,
+    AXE_ENTITE,
+    AXE_BLINE,
+    AXE_SITE,
+    MONTANT,
+    TIERS_CODE,
+    ARTICLE_CODE,
+    DATE_COMPTABLE,
+    SOURCE,
+    TYPE_LIGNE,
+    DATE_INSERTION
+)
+SELECT 
+    BL AS NUM_PIECE,
+    COMPTE ,
+    CASE 
+        WHEN NVL(HTN, 0) < 0 THEN -1 
+        ELSE 1 
+    END AS SENS,
+    CCE_4 AS AXE_CENTRE,
+    CCE_7 AS AXE_ENTITE,
+    CCE_5 AS AXE_BLINE,
+    CCE_6 AS AXE_SITE,
+    ABS(NVL(HTN, 0)) AS MONTANT,
+    TIERS AS TIERS_CODE,
+    ARTICLE AS ARTICLE_CODE,
+    DATE_BL AS DATE_COMPTABLE,
+    'COMMERCIAL02' AS SOURCE,
+    'DETAIL CA' AS TYPE_LIGNE,
+    SYSDATE AS DATE_INSERTION
+FROM commercial02
+WHERE DATE_BL >= '01/01/2026';
+
+
+
+--------------------------------------------------------------------
+
+
+STOJOU_CMGP_GLOBAL_D
+INSERT INTO balance_analytique (
+    NUM_PIECE,
+    COMPTE,
+    SENS,
+    AXE_CENTRE,
+    AXE_ENTITE,
+    AXE_BLINE,
+    AXE_SITE,
+    MONTANT,
+    TIERS_CODE,
+    ARTICLE_CODE,
+    DATE_COMPTABLE,
+    SOURCE,
+    TYPE_LIGNE,
+    DATE_INSERTION
+)
+SELECT 
+    VCRNUM_0 AS NUM_PIECE,
+    '61100000' AS COMPTE,
+    CASE 
+        WHEN NVL(FIFO, 0) < 0 THEN -1 
+        ELSE 1 
+    END AS SENS,
+    CENTRE AS AXE_CENTRE,      
+    null AS AXE_ENTITE,      
+    BLINE AS AXE_BLINE,       
+    null AS AXE_SITE,       
+    ABS(NVL(FIFO, 0)) AS MONTANT,
+    BPRNUM_0 AS TIERS_CODE,    
+    ITMREF_0 AS ARTICLE_CODE,   
+    IPTDAT_0 AS DATE_COMPTABLE,
+    'STOJOU_CMGP_GLOBAL_D' AS SOURCE,
+    'DETAIL STOCK' AS TYPE_LIGNE, 
+    SYSDATE AS DATE_INSERTION
+FROM stojou_cmgp_global_d
+WHERE IPTDAT_0 >= '01/01/2026'
+AND (VCRNUM_0 LIKE 'B%' or  substr(VCRNUM_0,1,2) IN ('RV','RP'))
+AND VCRTYP_0 IN (4,13) 
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------
+
+STOJOU_CMGP_GLOBAL_P
+INSERT INTO balance_analytique (
+    NUM_PIECE,
+    COMPTE,
+    SENS,
+    AXE_CENTRE,
+    AXE_ENTITE,
+    AXE_BLINE,
+    AXE_SITE,
+    MONTANT,
+    TIERS_CODE,
+    ARTICLE_CODE,
+    DATE_COMPTABLE,
+    SOURCE,
+    TYPE_LIGNE,
+    DATE_INSERTION
+)
+SELECT 
+    VCRNUM_0 AS NUM_PIECE,
+    '61100000' AS COMPTE,
+    CASE 
+        WHEN NVL(FIFO, 0) < 0 THEN -1 
+        ELSE 1 
+    END AS SENS,
+    CENTRE AS AXE_CENTRE,      
+    null AS AXE_ENTITE,      
+    BLINE AS AXE_BLINE,       
+    null AS AXE_SITE,       
+    ABS(NVL(FIFO, 0)) AS MONTANT,
+    BPRNUM_0 AS TIERS_CODE,    
+    ITMREF_0 AS ARTICLE_CODE,   
+    IPTDAT_0 AS DATE_COMPTABLE,
+    'STOJOU_CMGP_GLOBAL_P' AS SOURCE,
+    'DETAIL STOCK' AS TYPE_LIGNE, 
+    SYSDATE AS DATE_INSERTION
+FROM stojou_cmgp_global_p
+WHERE IPTDAT_0 >= '01/01/2026'
+AND (VCRNUM_0 LIKE 'B%' or  substr(VCRNUM_0,1,2) IN ('RV','RP'))
+AND VCRTYP_0 IN (4,13) 
+
+
+--------------------------------------------------------------------------------------
+
+COMMERCIAL04 : remise
+
+
+SELECT 
+    a.num_0 AS NUM_PIECE,
+
+    DECODE(
+        SUBSTR(a.bpcinv_0, 1, 1),
+        'P', '71241000',  --ou 71290000
+        'D', '71110000',  --ou 71190000
+        '71110000'
+    ) AS COMPTE,
+
+
+    DECODE(SUBSTR(a.sivtyp_0, 1, 1), 'F', -1, 'A', 1, -1) AS SENS,
+
+    c.cce_4 AS AXE_CENTRE,
+    c.cce_7 AS AXE_ENTITE,
+    c.cce_5 AS AXE_BLINE,
+    c.cce_6 AS AXE_SITE,
+
+    ABS(b.dtanot_0 * NVL(e.ratmlt_0, 1)) AS MONTANT,
+
+    a.bpcinv_0 AS TIERS_CODE,
+    NULL       AS ARTICLE_CODE,
+    a.invdat_0 AS DATE_COMPTABLE,
+
+    'COMMERCIAL04' AS SOURCE,
+    'DETAIL REMISE'    AS TYPE_LIGNE
+
+FROM sinvoicev a
+JOIN svcrfoot b   ON a.num_0 = b.vcrnum_0
+JOIN sinvoice e   ON e.num_0 = a.num_0
+LEFT JOIN cptanalin c ON c.vcrnum_0 = a.num_0 
+                     AND c.vcrlin_0 = 0
+
+WHERE a.invdat_0 >= TO_DATE('01/01/2026', 'DD/MM/YYYY')
+  AND a.invdtaamt_1 <> 0
+  AND b.numdta_0 = 1
+  AND SUBSTR(a.sivtyp_0, 1, 1) IN ('F', 'A');
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+COMMERCIAL06 AVOIR FACTURE
+
+
+SELECT 
+    x.num_0 as NUM_PIECE,
+    x.accdat_0 as DATE_COMPTABLE,
+    x.bpr_0 as TIERS_CODE,
+    y.itmref_0 ARTICLE_CODE,
+
+
+    ABS(y.qty_0 * y.netpri_0 * ratmlt_0) AS MONTANT ,
+
+    DECODE(SUBSTR(x.gte_0, 1, 1), 'F', 1, 'A', -1) AS SENS, 
+
+
+    c.cce_4 as AXE_CENTRE, c.cce_5 as AXE_BLINE,
+    c.cce_6 as AXE_SITE, c.cce_7 as AXE_ENTITE, 
+
+    DECODE(SUBSTR(x.bpr_0, 1, 1), 
+           'P', '71241000',  -- ou 71290000 si compte RRR
+           'D', '71110000',  -- ou 71190000 si compte RRR
+           '71110000'
+    ) AS COMPTE,
+
+    'COMMERCIAL06' AS SOURCE,
+    'DETAIL AVOIR FACT'    AS TYPE_LIGNE
+        
+FROM sinvoice x
+JOIN sinvoiced y ON x.num_0 = y.num_0
+JOIN itmmaster t ON t.itmref_0 = y.itmref_0
+LEFT JOIN cptanalin c ON c.vcrnum_0 = y.num_0
+                     AND c.vcrlin_0 = y.sidlin_0
+
+WHERE x.accdat_0 >= TO_DATE('01/01/2026','DD/MM/YYYY')      
+AND substr(x.num_0,1,2)  LIKE 'AF%'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+DATAMART_ANALYTIQUE : AUTRES CHARGES ET PRODUITS DU GRAND LIVRE
+(A exécuter EN DERNIER pour récupérer toutes les écritures P&L 6 et 7 non encore intégrées)
+-- [MIS EN COMMENTAIRE] Risque de doublon avec commercial02 (les BL ne matchent pas les numéros de pièces comptables num_0)
+/*
+INSERT INTO balance_analytique (
+    NUM_PIECE,
+    COMPTE,
+    SENS,
+    AXE_CENTRE,
+    AXE_ENTITE,
+    AXE_BLINE,
+    AXE_SITE,
+    MONTANT,
+    TIERS_CODE,
+    ARTICLE_CODE,
+    DATE_COMPTABLE,
+    SOURCE,
+    TYPE_LIGNE,
+    DATE_INSERTION
+)
+SELECT 
+    num_0 AS NUM_PIECE,
+    acc_0 AS COMPTE,
+    NVL(sns_0, CASE WHEN NVL(amtled_0, amtcur_0) < 0 THEN -1 ELSE 1 END) AS SENS,
+    NVL(cce_4, '00000000') AS AXE_CENTRE,
+    NVL(cce_7, 'CMGP')     AS AXE_ENTITE,
+    NVL(cce_5, '00000000') AS AXE_BLINE,
+    NVL(cce_6, '00000000') AS AXE_SITE,
+    ABS(NVL(amtled_0, amtcur_0)) AS MONTANT,
+    NULL AS TIERS_CODE,
+    NULL AS ARTICLE_CODE,
+    accdat_0 AS DATE_COMPTABLE,
+    'DATAMART_ANALYTIQUE' AS SOURCE,
+    'DETAIL OD'           AS TYPE_LIGNE,
+    SYSDATE AS DATE_INSERTION
+FROM datamart_analytique
+WHERE accdat_0 >= '01/01/2026'
+  AND SUBSTR(acc_0, 1, 1) IN ('6', '7')
+  AND num_0 NOT IN (
+      SELECT DISTINCT NUM_PIECE 
+      FROM balance_analytique
+      WHERE NUM_PIECE IS NOT NULL
+  );
+*/
+
+---------------------------------------------------------------------
+
+preuve
+SELECT 
+    s.VCRTYP_0,
+    COUNT(distinct c.BL) AS nombre_commercial02,
+    COUNT(DISTINCT s.VCRNUM_0) AS nb_stojou
+FROM 
+    stojou_cmgp_global_p s
+left JOIN 
+    commercial02 c ON s.VCRNUM_0 = c.BL
+WHERE s.IPTDAT_0 >= '01/01/2026'
+AND (s.VCRNUM_0 LIKE 'B%' or  substr(s.VCRNUM_0,1,2) IN ('RV','RP'))    
+GROUP BY 
+    s.VCRTYP_0
+ORDER BY 
+    s.VCRTYP_0;
+
+
+
+select NUM_PIECE from balance_analytique where source = 'commercial02'
+minus
+select NUM_PIECE from balance_analytique where source = 'stojou_cmgp_global_d'
+----------------------------------------------------------------------
+
+
+
+
+
+
