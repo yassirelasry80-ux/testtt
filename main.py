@@ -52,7 +52,7 @@ def run_pipeline(
         "stojou_d":     (ext.extract_stojou_d, "STOJOU_CMGP_GLOBAL_D", "Stocks D FIFO (Sage X3)"),
         "commercial04": (ext.extract_commercial04_remise, "COMMERCIAL04", "Remises de pied (Sage X3)"),
         "commercial06": (ext.extract_commercial06_af, "COMMERCIAL06", "Avoirs Financiers AF (Sage X3)"),
-        "datamart_analytique": (ext.extract_datamart_analytique, "DATAMART_ANALYTIQUE", "Grand Livre (Oracle BI)"),
+        # "datamart_analytique": (ext.extract_datamart_analytique, "DATAMART_ANALYTIQUE", "Grand Livre (Oracle BI)"),
     }
 
     logger.info("=" * 70)
