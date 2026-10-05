@@ -164,23 +164,6 @@ def load(
     with oracle_connection(config.bi_oracle) as conn:
         cursor = conn.cursor()
 
-        # Définition explicite des types de bind pour Oracle (garantit le mapping exact)
-        cursor.setinputsizes(
-            oracledb.DB_TYPE_VARCHAR,  # 1. NUM_PIECE
-            oracledb.DB_TYPE_VARCHAR,  # 2. COMPTE
-            oracledb.DB_TYPE_NUMBER,   # 3. SENS
-            oracledb.DB_TYPE_VARCHAR,  # 4. AXE_CENTRE
-            oracledb.DB_TYPE_VARCHAR,  # 5. AXE_ENTITE
-            oracledb.DB_TYPE_VARCHAR,  # 6. AXE_BLINE
-            oracledb.DB_TYPE_VARCHAR,  # 7. AXE_SITE
-            oracledb.DB_TYPE_NUMBER,   # 8. MONTANT
-            oracledb.DB_TYPE_VARCHAR,  # 9. TIERS_CODE
-            oracledb.DB_TYPE_VARCHAR,  # 10. ARTICLE_CODE
-            oracledb.DB_TYPE_DATE,     # 11. DATE_COMPTABLE
-            oracledb.DB_TYPE_VARCHAR,  # 12. SOURCE
-            oracledb.DB_TYPE_VARCHAR,  # 13. TYPE_LIGNE
-        )
-
         # ── 1. PURGE PRÉALABLE ──
         if mode == "truncate":
             logger.info(f"[{config.entite_name}] TRUNCATE TABLE {table}")
@@ -209,6 +192,23 @@ def load(
                 :11, :12, :13, SYSTIMESTAMP
             )
         """
+
+        # Définition explicite des 13 types de bind pour l'INSERT (fix DPY-3013)
+        cursor.setinputsizes(
+            oracledb.DB_TYPE_VARCHAR,  # 1. NUM_PIECE
+            oracledb.DB_TYPE_VARCHAR,  # 2. COMPTE
+            oracledb.DB_TYPE_NUMBER,   # 3. SENS
+            oracledb.DB_TYPE_VARCHAR,  # 4. AXE_CENTRE
+            oracledb.DB_TYPE_VARCHAR,  # 5. AXE_ENTITE
+            oracledb.DB_TYPE_VARCHAR,  # 6. AXE_BLINE
+            oracledb.DB_TYPE_VARCHAR,  # 7. AXE_SITE
+            oracledb.DB_TYPE_NUMBER,   # 8. MONTANT
+            oracledb.DB_TYPE_VARCHAR,  # 9. TIERS_CODE
+            oracledb.DB_TYPE_VARCHAR,  # 10. ARTICLE_CODE
+            oracledb.DB_TYPE_DATE,     # 11. DATE_COMPTABLE
+            oracledb.DB_TYPE_VARCHAR,  # 12. SOURCE
+            oracledb.DB_TYPE_VARCHAR,  # 13. TYPE_LIGNE
+        )
 
         total_inserted = 0
 
