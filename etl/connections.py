@@ -6,47 +6,22 @@ SQL Server (AGIRH) : pyodbc
 """
 
 import logging
-import threading
 from contextlib import contextmanager
 import oracledb
 from etl.config import DbConfig
 
 logger = logging.getLogger(__name__)
 
-# ── Initialisation Thread-Safe du Client Oracle (Mode Thick) ──
-_oracle_init_lock = threading.Lock()
-_oracle_client_initialized = False
-
-
-def _init_oracle_client():
-    """Initialise le client Oracle (mode Thick) de manière thread-safe."""
-    global _oracle_client_initialized
-    with _oracle_init_lock:
-        if _oracle_client_initialized:
-            return
-        try:
-            oracledb.init_oracle_client()
-            logger.info("Client Oracle (mode Thick) initialisé avec succès.")
-        except oracledb.ProgrammingError:
-            pass  # Déjà initialisé par un autre thread
-        except Exception as e:
-            logger.warning(f"Initialisation du client Oracle impossible (mode Thin activé) : {e}")
-        finally:
-            _oracle_client_initialized = True
+# Initialisation du client Oracle si disponible (mode Thick / Thin)
+try:
+    oracledb.init_oracle_client()
+except Exception:
+    pass
 
 
 @contextmanager
 def oracle_connection(cfg: DbConfig):
-    """
-    Context manager pour une connexion Oracle en mode Thick.
-    
-    Usage:
-        with oracle_connection(config.x3_oracle) as conn:
-            df = pd.read_sql(query, conn)
-    """
-    # S'assurer que le mode Thick est initialisé pour Oracle 11g/11c
-    _init_oracle_client()
-
+    """Context manager pour une connexion Oracle."""
     dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
     conn = None
     try:
