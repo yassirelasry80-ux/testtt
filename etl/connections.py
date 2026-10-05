@@ -8,6 +8,7 @@ SQL Server (AGIRH) : pyodbc
 import logging
 from contextlib import contextmanager
 import oracledb
+import pyodbc
 from etl.config import DbConfig
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,6 @@ def sqlserver_connection(cfg: DbConfig):
         with sqlserver_connection(config.agirh_sqlserver) as conn:
             df = pd.read_sql(query, conn)
     """
-    import pyodbc
-
     conn_str = (
         f"DRIVER={{{cfg.driver}}};"
         f"SERVER={cfg.host},{cfg.port};"
