@@ -158,6 +158,9 @@ def complement_with_moovapps(
     # LEFT JOIN sur NUM_PIECE
     suffixed = df.merge(df_mv, on="NUM_PIECE", how="left", suffixes=("", "_MV"))
 
+    # Suivi des lignes enrichies par Moovapps
+    enriched = pd.Series(False, index=suffixed.index)
+
     # Colonnes texte : compléter si NULL ou vide
     text_cols = [
         "AXE_CENTRE", "AXE_ENTITE", "AXE_BLINE", "AXE_SITE",
@@ -167,8 +170,10 @@ def complement_with_moovapps(
         mv_col = f"{col}_MV"
         if mv_col in suffixed.columns:
             mask = suffixed[col].isnull() | (suffixed[col].astype(str).str.strip() == "")
+            has_mv_value = mask & suffixed[mv_col].notna() & (suffixed[mv_col].astype(str).str.strip() != "")
             suffixed.loc[mask, col] = suffixed.loc[mask, mv_col]
-            nb_filled = mask.sum() - suffixed.loc[mask, col].isnull().sum()
+            enriched = enriched | has_mv_value
+            nb_filled = has_mv_value.sum()
             if nb_filled > 0:
                 logger.info(f"  Complément Moovapps : {nb_filled} valeur(s) renseignée(s) pour {col}")
 
@@ -180,18 +185,26 @@ def complement_with_moovapps(
             suffixed[col] = pd.to_numeric(suffixed[col], errors="coerce")
             suffixed[mv_col] = pd.to_numeric(suffixed[mv_col], errors="coerce")
             mask = suffixed[col].isnull() | (suffixed[col] == 0)
+            has_mv_value = mask & suffixed[mv_col].notna() & (suffixed[mv_col] != 0)
             suffixed.loc[mask, col] = suffixed.loc[mask, mv_col]
-            nb_filled = mask.sum() - suffixed.loc[mask, col].isnull().sum()
+            enriched = enriched | has_mv_value
+            nb_filled = has_mv_value.sum()
             if nb_filled > 0:
                 logger.info(f"  Complément Moovapps : {nb_filled} valeur(s) renseignée(s) pour {col}")
 
     # DATE_COMPTABLE : compléter si NULL
     if "DATE_COMPTABLE_MV" in suffixed.columns:
         mask = suffixed["DATE_COMPTABLE"].isnull()
+        has_mv_value = mask & suffixed["DATE_COMPTABLE_MV"].notna()
         suffixed.loc[mask, "DATE_COMPTABLE"] = suffixed.loc[mask, "DATE_COMPTABLE_MV"]
-        nb_filled = mask.sum() - suffixed.loc[mask, "DATE_COMPTABLE"].isnull().sum()
+        enriched = enriched | has_mv_value
+        nb_filled = has_mv_value.sum()
         if nb_filled > 0:
             logger.info(f"  Complément Moovapps : {nb_filled} valeur(s) renseignée(s) pour DATE_COMPTABLE")
+
+    # Marquer TYPE_LIGNE pour les lignes enrichies par Moovapps
+    suffixed.loc[enriched, "TYPE_LIGNE"] = "DETAIL OD MOOVAPPS"
+    logger.info(f"  {enriched.sum()} ligne(s) marquée(s) 'DETAIL OD MOOVAPPS'")
 
     # Supprimer les colonnes suffixées _MV
     mv_columns = [c for c in suffixed.columns if c.endswith("_MV")]
