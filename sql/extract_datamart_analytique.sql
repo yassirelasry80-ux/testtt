@@ -4,10 +4,10 @@ SELECT
     
     NVL(sns_0, CASE WHEN NVL(amtled_0, amtcur_0) < 0 THEN -1 ELSE 1 END) AS SENS,
 
-    NVL(cce_4) AS AXE_CENTRE,
-    NVL(cce_7)     AS AXE_ENTITE,
-    NVL(cce_5) AS AXE_BLINE,
-    NVL(cce_6) AS AXE_SITE,
+    cce_4 AS AXE_CENTRE,
+    cce_7    AS AXE_ENTITE,
+    cce_5 AS AXE_BLINE,
+    cce_6 AS AXE_SITE,
 
     ABS(NVL(amtled_0, amtcur_0)) AS MONTANT,
 
@@ -21,8 +21,12 @@ SELECT
 FROM datamart_analytique
 
 WHERE accdat_0 >= :start_date
-  AND num_0 NOT IN (
-      SELECT DISTINCT NUM_PIECE 
-      FROM balance_analytique
-      WHERE NUM_PIECE IS NOT NULL
-  )
+AND acc_0 NOT LIKE '7%' AND acc_0 NOT LIKE '611%'
+
+AND num_0 NOT IN 
+    (
+        SELECT DISTINCT NUM_PIECE 
+        FROM balance_analytique
+        WHERE NUM_PIECE IS NOT NULL
+        AND DATE_COMPTABLE >= :start_date
+    )

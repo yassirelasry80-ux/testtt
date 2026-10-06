@@ -122,4 +122,83 @@ def _verify_equilibre(df_x3: pd.DataFrame, df_res: pd.DataFrame) -> None:
         logger.info("[OK] Équilibre strict vérifié pour tous les comptes ODP.")
 
 
+def complement_with_moovapps(
+    df_datamart: pd.DataFrame, df_moovapps: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Pour chaque ligne du Datamart Analytique, si un champ est vide/NULL,
+    le compléter avec la valeur correspondante de Moovapps (jointure LEFT par NUM_PIECE).
+
+    - Colonnes texte (AXE_CENTRE, AXE_ENTITE, AXE_BLINE, AXE_SITE, COMPTE,
+      TIERS_CODE, ARTICLE_CODE) : complétées si NULL ou chaîne vide.
+    - Colonnes numériques (MONTANT, SENS) : complétées si NULL ou == 0.
+    - DATE_COMPTABLE : complétée si NULL.
+    """
+    if df_datamart is None or df_datamart.empty:
+        logger.warning("Datamart Analytique vide — rien à compléter.")
+        return pd.DataFrame(columns=BALANCE_COLUMNS)
+
+    df = df_datamart.copy()
+    df.columns = [str(c).strip().upper() for c in df.columns]
+
+    if df_moovapps is None or df_moovapps.empty:
+        logger.info("Moovapps vide — aucun complément appliqué.")
+        return df
+
+    df_mv = df_moovapps.copy()
+    df_mv.columns = [str(c).strip().upper() for c in df_mv.columns]
+
+    # Normaliser NUM_PIECE dans les deux DataFrames
+    df["NUM_PIECE"] = df["NUM_PIECE"].astype(str).str.strip()
+    df_mv["NUM_PIECE"] = df_mv["NUM_PIECE"].astype(str).str.strip()
+
+    # Dédupliquer Moovapps par NUM_PIECE (garder la première occurrence)
+    df_mv = df_mv.drop_duplicates(subset="NUM_PIECE", keep="first")
+
+    # LEFT JOIN sur NUM_PIECE
+    suffixed = df.merge(df_mv, on="NUM_PIECE", how="left", suffixes=("", "_MV"))
+
+    # Colonnes texte : compléter si NULL ou vide
+    text_cols = [
+        "AXE_CENTRE", "AXE_ENTITE", "AXE_BLINE", "AXE_SITE",
+        "COMPTE", "TIERS_CODE", "ARTICLE_CODE",
+    ]
+    for col in text_cols:
+        mv_col = f"{col}_MV"
+        if mv_col in suffixed.columns:
+            mask = suffixed[col].isnull() | (suffixed[col].astype(str).str.strip() == "")
+            suffixed.loc[mask, col] = suffixed.loc[mask, mv_col]
+            nb_filled = mask.sum() - suffixed.loc[mask, col].isnull().sum()
+            if nb_filled > 0:
+                logger.info(f"  Complément Moovapps : {nb_filled} valeur(s) renseignée(s) pour {col}")
+
+    # Colonnes numériques : compléter si NULL ou == 0
+    num_cols = ["MONTANT", "SENS"]
+    for col in num_cols:
+        mv_col = f"{col}_MV"
+        if mv_col in suffixed.columns:
+            suffixed[col] = pd.to_numeric(suffixed[col], errors="coerce")
+            suffixed[mv_col] = pd.to_numeric(suffixed[mv_col], errors="coerce")
+            mask = suffixed[col].isnull() | (suffixed[col] == 0)
+            suffixed.loc[mask, col] = suffixed.loc[mask, mv_col]
+            nb_filled = mask.sum() - suffixed.loc[mask, col].isnull().sum()
+            if nb_filled > 0:
+                logger.info(f"  Complément Moovapps : {nb_filled} valeur(s) renseignée(s) pour {col}")
+
+    # DATE_COMPTABLE : compléter si NULL
+    if "DATE_COMPTABLE_MV" in suffixed.columns:
+        mask = suffixed["DATE_COMPTABLE"].isnull()
+        suffixed.loc[mask, "DATE_COMPTABLE"] = suffixed.loc[mask, "DATE_COMPTABLE_MV"]
+        nb_filled = mask.sum() - suffixed.loc[mask, "DATE_COMPTABLE"].isnull().sum()
+        if nb_filled > 0:
+            logger.info(f"  Complément Moovapps : {nb_filled} valeur(s) renseignée(s) pour DATE_COMPTABLE")
+
+    # Supprimer les colonnes suffixées _MV
+    mv_columns = [c for c in suffixed.columns if c.endswith("_MV")]
+    suffixed.drop(columns=mv_columns, inplace=True)
+
+    logger.info(f"Complément Moovapps terminé — {len(suffixed)} lignes résultantes.")
+    return suffixed
+
+
 transform = transform_odp_agirh

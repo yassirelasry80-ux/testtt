@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from etl.config import load_config, get_entities_list
 import etl.extract as ext
-from etl.transform import transform_odp_agirh, standardize_balance_df
+from etl.transform import transform_odp_agirh, standardize_balance_df, complement_with_moovapps
 from etl.load import load
 
 warnings.filterwarnings("ignore", message=".*pandas only supports SQLAlchemy.*")
@@ -29,8 +29,6 @@ FLUX_STANDARDS = [
     (ext.extract_stojou_d, "STOJOU_CMGP_GLOBAL_D", "Stocks D FIFO (Sage X3)"),
     (ext.extract_commercial04_remise, "COMMERCIAL04", "Remises de pied (Sage X3)"),
     (ext.extract_commercial06_af, "COMMERCIAL06", "Avoirs Financiers AF (Sage X3)"),
-    # (ext.extract_datamart_analytique, "DATAMART_ANALYTIQUE", "Grand Livre (Oracle BI)"),
-    (ext.extract_moovapps, "MOOVAPPS", "Moovapps (Oracle)"),
 ]
 
 
@@ -70,6 +68,21 @@ def run():
             except Exception as e:
                 logger.error(f"[{entite}] Erreur sur {src_name} : {e}", exc_info=True)
                 stats[entite][src_name] = {"statut": "KO", "lignes": 0, "erreur": str(e)}
+
+        # 3. Flux DATAMART_ANALYTIQUE + Complément Moovapps
+        #    Le Datamart est la source principale. Moovapps sert uniquement
+        #    à compléter les champs vides/NULL (jointure par NUM_PIECE).
+        try:
+            logger.info(f"[{entite}] >> Datamart Analytique + Complément Moovapps")
+            df_datamart = ext.extract_datamart_analytique(config)
+            df_moovapps = ext.extract_moovapps(config)
+            df_bal = complement_with_moovapps(df_datamart, df_moovapps)
+            df_bal = standardize_balance_df(df_bal, default_source="DATAMART_ANALYTIQUE")
+            nb = load(df_bal, config, source_name="DATAMART_ANALYTIQUE")
+            stats[entite]["DATAMART_ANALYTIQUE"] = {"statut": "OK", "lignes": nb}
+        except Exception as e:
+            logger.error(f"[{entite}] Erreur sur DATAMART_ANALYTIQUE : {e}", exc_info=True)
+            stats[entite]["DATAMART_ANALYTIQUE"] = {"statut": "KO", "lignes": 0, "erreur": str(e)}
 
     # Rapport final d'exécution
     print("\n+" + "=" * 76 + "+")
