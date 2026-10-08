@@ -1,8 +1,3 @@
--- ====================================================================
--- EXTRACTION : COMMERCIAL02 (Chiffre d'Affaires Lignes Ventes)
--- Base source : Oracle BI (Schéma bi_{entite_name})
--- ====================================================================
-
 SELECT 
     BL AS NUM_PIECE,
     COMPTE,
@@ -22,3 +17,4 @@ SELECT
     'DETAIL CA' AS TYPE_LIGNE
 FROM commercial02
 WHERE DATE_BL >= :start_date
+  AND DATE_BL <= :end_date

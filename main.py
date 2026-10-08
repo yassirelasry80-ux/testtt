@@ -25,10 +25,10 @@ logger = logging.getLogger("main")
 # Mapping des flux standards : (fonction_extraction, nom_source_table, description)
 FLUX_STANDARDS = [
     (ext.extract_commercial02, "COMMERCIAL02", "CA Ventes (Oracle BI)"),
-    (ext.extract_stojou_p, "STOJOU_CMGP_GLOBAL_P", "Stocks P FIFO (Sage X3)"),
-    (ext.extract_stojou_d, "STOJOU_CMGP_GLOBAL_D", "Stocks D FIFO (Sage X3)"),
-    (ext.extract_commercial04_remise, "COMMERCIAL04", "Remises de pied (Sage X3)"),
-    (ext.extract_commercial06_af, "COMMERCIAL06", "Avoirs Financiers AF (Sage X3)"),
+    (ext.extract_stojou_p, "STOJOU_CMGP_GLOBAL_P", "Stocks P FIFO (Oracle BI)"),
+    (ext.extract_stojou_d, "STOJOU_CMGP_GLOBAL_D", "Stocks D FIFO (Oracle BI)"),
+    (ext.extract_commercial04_remise, "COMMERCIAL04", "Remises de pied (Oracle BI)"),
+    (ext.extract_commercial06_af, "COMMERCIAL06", "Avoirs Financiers AF (Oracle BI)"),
 ]
 
 
@@ -45,14 +45,19 @@ def run():
     for i, entite in enumerate(entites, 1):
         logger.info(f"[{i}/{len(entites)}] TRAITEMENT DE L'ENTITÉ : {entite}")
         config = load_config(entite_name=entite)
+        logger.info(f"[{entite}] Période : du {config.start_date} au {config.end_date or 'Indéfini'}")
         stats[entite] = {}
 
         # 1. Flux AGIRH (Paie ODP X3 + AGIRH SQL Server)
         try:
-            logger.info(f"[{entite}] >> Paie AGIRH (ODP X3 + SQL Server)")
-            df_bal = transform_odp_agirh(ext.extract_x3(config), ext.extract_agirh(config))
-            nb = load(df_bal, config, source_name="AGIRH")
-            stats[entite]["AGIRH"] = {"statut": "OK", "lignes": nb}
+            if not config.agirh_sqlserver.host or not config.agirh_sqlserver.user:
+                logger.info(f"[{entite}] >> Paie AGIRH ignorée (non configurée pour cette filiale)")
+                stats[entite]["AGIRH"] = {"statut": "IGNORÉ", "lignes": 0}
+            else:
+                logger.info(f"[{entite}] >> Paie AGIRH (ODP X3 + SQL Server)")
+                df_bal = transform_odp_agirh(ext.extract_x3(config), ext.extract_agirh(config))
+                nb = load(df_bal, config, source_name="AGIRH")
+                stats[entite]["AGIRH"] = {"statut": "OK", "lignes": nb}
         except Exception as e:
             logger.error(f"[{entite}] Erreur sur AGIRH : {e}", exc_info=True)
             stats[entite]["AGIRH"] = {"statut": "KO", "lignes": 0, "erreur": str(e)}
@@ -92,7 +97,7 @@ def run():
     print("|  ----------+---------------------+--------+-----------------+------------ |")
     for ent, res_dict in stats.items():
         for src, res in res_dict.items():
-            stat = "[OK]" if res["statut"] == "OK" else "[KO]"
+            stat = "[OK]" if res["statut"] == "OK" else ("[SKIP]" if res["statut"] == "IGNORÉ" else "[KO]")
             err = res.get("erreur", "")
             err_short = (err[:10] + "...") if err else ""
             print(f"|  {ent:<10}| {src:<20}| {stat:<7}| {res['lignes']:>15} | {err_short:<12}|")

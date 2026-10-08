@@ -1,8 +1,3 @@
--- ====================================================================
--- EXTRACTION : COMMERCIAL06 (Avoirs Financiers AF / RFA)
--- Base source : Sage X3 Prod (Oracle X3)
--- ====================================================================
-
 SELECT 
     x.num_0 AS NUM_PIECE,
     x.accdat_0 AS DATE_COMPTABLE,
@@ -34,4 +29,5 @@ LEFT JOIN cptanalin c ON c.vcrnum_0 = y.num_0
                      AND c.vcrlin_0 = y.sidlin_0
 
 WHERE x.accdat_0 >= :start_date
+  AND x.accdat_0 <= :end_date
   AND SUBSTR(x.num_0, 1, 2) = 'AF'

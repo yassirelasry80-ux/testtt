@@ -1,8 +1,3 @@
--- ====================================================================
--- EXTRACTION : COMMERCIAL04 (Remises Exceptionnelles en pied de facture)
--- Base source : Sage X3 Prod (Oracle X3)
--- ====================================================================
-
 SELECT 
     a.num_0 AS NUM_PIECE,
 
@@ -33,8 +28,9 @@ FROM sinvoicev a
 JOIN svcrfoot b   ON a.num_0 = b.vcrnum_0
 JOIN sinvoice e   ON e.num_0 = a.num_0
 LEFT JOIN cptanalin c ON c.vcrnum_0 = a.num_0 
-                     AND c.vcrlin_0 = 0
+                     AND c.vcrlin_0 = 1000
 
 WHERE a.invdat_0 >= :start_date
+  AND a.invdat_0 <= :end_date
   AND a.invdtaamt_1 <> 0
   AND SUBSTR(a.sivtyp_0, 1, 1) IN ('F', 'A')

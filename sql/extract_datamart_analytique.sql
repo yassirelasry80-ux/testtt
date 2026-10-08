@@ -21,12 +21,14 @@ SELECT
 FROM datamart_analytique
 
 WHERE accdat_0 >= :start_date
-AND acc_0 NOT LIKE '7%' AND acc_0 NOT LIKE '611%'
+  AND accdat_0 <= :end_date
+  AND acc_0 NOT LIKE '7%' AND acc_0 NOT LIKE '611%'
 
-AND num_0 NOT IN 
+  AND num_0 NOT IN 
     (
         SELECT DISTINCT NUM_PIECE 
         FROM balance_analytique
-        WHERE NUM_PIECE IS NOT NULL
+        WHERE SOURCE <> 'DATAMART_ANALYTIQUE' 
         AND DATE_COMPTABLE >= :start_date
+        AND DATE_COMPTABLE <= :end_date
     )

@@ -1,20 +1,15 @@
--- ====================================================================
--- EXTRACTION : STOJOU_CMGP_GLOBAL_P (Coût des Ventes / Stock FIFO P)
--- Base source : Sage X3 Prod (Oracle X3)
--- ====================================================================
-
 SELECT 
     VCRNUM_0 AS NUM_PIECE,
     '61100000' AS COMPTE,
     CASE 
-        WHEN NVL(FIFO, 0) < 0 THEN -1 
+        WHEN NVL(QTYPCU_0*FIFO, 0) < 0 THEN -1 
         ELSE 1 
     END AS SENS,
     CENTRE AS AXE_CENTRE,      
     NULL AS AXE_ENTITE,      
     BLINE AS AXE_BLINE,       
     NULL AS AXE_SITE,       
-    ABS(NVL(FIFO, 0)) AS MONTANT,
+    ABS(NVL(QTYPCU_0*FIFO, 0)) AS MONTANT,
     BPRNUM_0 AS TIERS_CODE,    
     ITMREF_0 AS ARTICLE_CODE,   
     IPTDAT_0 AS DATE_COMPTABLE,
@@ -22,5 +17,6 @@ SELECT
     'DETAIL STOCK' AS TYPE_LIGNE
 FROM stojou_cmgp_global_p
 WHERE IPTDAT_0 >= :start_date
+  AND IPTDAT_0 <= :end_date
   AND (VCRNUM_0 LIKE 'B%' OR SUBSTR(VCRNUM_0, 1, 2) IN ('RV', 'RP'))
   AND VCRTYP_0 IN (4, 13)

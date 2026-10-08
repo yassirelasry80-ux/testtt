@@ -6,7 +6,7 @@ import os
 import logging
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ class AppConfig:
     agirh_sqlserver: DbConfig
     bi_oracle: DbConfig
     moovapps_oracle: DbConfig
+    end_date: Optional[str] = None
 
 
 def get_entities_list(env_path: str = ".env") -> List[str]:
@@ -70,6 +71,21 @@ def _oracle_moovapps_db(prefix: str) -> DbConfig:
     )
 
 
+def _sqlserver_agirh_db(prefix: str) -> DbConfig:
+    """Helper pour instancier la configuration SQL Server AGIRH (par entité ou fallback, ex: CMGP_DB_AGIRH_*)."""
+    p = f"{prefix}_DB_AGIRH"
+    p_alt = f"{prefix}_AGIRH_SQLSERVER"
+    f = "AGIRH_SQLSERVER"
+    return DbConfig(
+        host=os.getenv(f"{p}_HOST") or os.getenv(f"{p_alt}_HOST") or os.getenv(f"{f}_HOST", ""),
+        port=int(os.getenv(f"{p}_PORT") or os.getenv(f"{p_alt}_PORT") or os.getenv(f"{f}_PORT", "1433")),
+        database=os.getenv(f"{p}_DB") or os.getenv(f"{p_alt}_DB") or os.getenv(f"{f}_DB", ""),
+        user=os.getenv(f"{p}_USER") or os.getenv(f"{p_alt}_USER") or os.getenv(f"{f}_USER", ""),
+        password=os.getenv(f"{p}_PASSWORD") or os.getenv(f"{p_alt}_PASSWORD") or os.getenv(f"{f}_PASSWORD", ""),
+        driver=os.getenv(f"{p}_DRIVER") or os.getenv(f"{p_alt}_DRIVER") or os.getenv(f"{f}_DRIVER", "ODBC Driver 17 for SQL Server"),
+    )
+
+
 def load_config(env_path: str = ".env", entite_name: str = None) -> AppConfig:
     """Charge la configuration pour l'entité choisie depuis le fichier .env."""
     p = Path(env_path)
@@ -88,12 +104,7 @@ def load_config(env_path: str = ".env", entite_name: str = None) -> AppConfig:
         x3_oracle=_oracle_db(prefix, "SOURCE"),
         bi_oracle=_oracle_db(prefix, "TARGET"),
         moovapps_oracle=_oracle_moovapps_db(prefix),
-        agirh_sqlserver=DbConfig(
-            host=os.getenv("AGIRH_SQLSERVER_HOST", ""),
-            port=int(os.getenv("AGIRH_SQLSERVER_PORT", "1433")),
-            database=os.getenv("AGIRH_SQLSERVER_DB", ""),
-            user=os.getenv("AGIRH_SQLSERVER_USER", ""),
-            password=os.getenv("AGIRH_SQLSERVER_PASSWORD", ""),
-            driver=os.getenv("AGIRH_SQLSERVER_DRIVER", "ODBC Driver 17 for SQL Server"),
-        ),
+        agirh_sqlserver=_sqlserver_agirh_db(prefix),
+        end_date=os.getenv("END_DATE", "").strip() or None,
     )
+

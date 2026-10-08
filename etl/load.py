@@ -46,6 +46,13 @@ def load(
     elif isinstance(start_date, datetime):
         start_date = start_date.date()
 
+    end_date = config.end_date
+    if end_date:
+        if isinstance(end_date, str):
+            end_date = datetime.strptime(end_date[:10], "%d/%m/%Y").date()
+        elif isinstance(end_date, datetime):
+            end_date = end_date.date()
+
     # ── 1. Transformation vectorisée instantanée (0.2s pour 75k lignes) ──
     df_load = df[COLUMNS_ORDER].copy()
     df_load["COMPTE"] = df_load["COMPTE"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
@@ -64,13 +71,23 @@ def load(
         elif mode == "delete_insert":
             sources_to_delete = [source_name] if source_name else list({r[11] for r in rows if r[11]})
             for src in sources_to_delete:
-                delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1 AND DATE_COMPTABLE >= :2"
-                cursor.execute(delete_sql, [src, start_date])
-                logger.info(
-                    f"[{config.entite_name}] Purge ciblée : DELETE FROM {table} "
-                    f"WHERE SOURCE = '{src}' AND DATE_COMPTABLE >= {start_date.strftime('%d/%m/%Y')} "
-                    f"({cursor.rowcount} lignes supprimées)"
-                )
+                if end_date:
+                    delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1 AND DATE_COMPTABLE >= :2 AND DATE_COMPTABLE <= :3"
+                    cursor.execute(delete_sql, [src, start_date, end_date])
+                    logger.info(
+                        f"[{config.entite_name}] Purge ciblée : DELETE FROM {table} "
+                        f"WHERE SOURCE = '{src}' AND DATE_COMPTABLE >= {start_date.strftime('%d/%m/%Y')} "
+                        f"AND DATE_COMPTABLE <= {end_date.strftime('%d/%m/%Y')} "
+                        f"({cursor.rowcount} lignes supprimées)"
+                    )
+                else:
+                    delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1 AND DATE_COMPTABLE >= :2"
+                    cursor.execute(delete_sql, [src, start_date])
+                    logger.info(
+                        f"[{config.entite_name}] Purge ciblée : DELETE FROM {table} "
+                        f"WHERE SOURCE = '{src}' AND DATE_COMPTABLE >= {start_date.strftime('%d/%m/%Y')} "
+                        f"({cursor.rowcount} lignes supprimées)"
+                    )
 
         # ── 3. Insertion en batch haute performance ──
         insert_sql = f"""
