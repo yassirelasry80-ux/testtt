@@ -2,7 +2,7 @@
 load.py — Chargement ultra-rapide et vectorisé dans bi_{entite}.balance_analytique.
 
 Modes de chargement :
-    - delete_insert (défaut, sécurisé) : Purge ciblée par SOURCE et DATE_COMPTABLE >= start_date
+    - delete_insert (défaut, sécurisé) : Purge ciblée par SOURCE uniquement (sans condition de date)
     - truncate (optionnel) : TRUNCATE complet de la table
 """
 
@@ -71,23 +71,12 @@ def load(
         elif mode == "delete_insert":
             sources_to_delete = [source_name] if source_name else list({r[11] for r in rows if r[11]})
             for src in sources_to_delete:
-                if end_date:
-                    delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1 AND DATE_COMPTABLE >= :2 AND DATE_COMPTABLE <= :3"
-                    cursor.execute(delete_sql, [src, start_date, end_date])
-                    logger.info(
-                        f"[{config.entite_name}] Purge ciblée : DELETE FROM {table} "
-                        f"WHERE SOURCE = '{src}' AND DATE_COMPTABLE >= {start_date.strftime('%d/%m/%Y')} "
-                        f"AND DATE_COMPTABLE <= {end_date.strftime('%d/%m/%Y')} "
-                        f"({cursor.rowcount} lignes supprimées)"
-                    )
-                else:
-                    delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1 AND DATE_COMPTABLE >= :2"
-                    cursor.execute(delete_sql, [src, start_date])
-                    logger.info(
-                        f"[{config.entite_name}] Purge ciblée : DELETE FROM {table} "
-                        f"WHERE SOURCE = '{src}' AND DATE_COMPTABLE >= {start_date.strftime('%d/%m/%Y')} "
-                        f"({cursor.rowcount} lignes supprimées)"
-                    )
+                delete_sql = f"DELETE FROM {table} WHERE SOURCE = :1"
+                cursor.execute(delete_sql, [src])
+                logger.info(
+                    f"[{config.entite_name}] Purge ciblée : DELETE FROM {table} "
+                    f"WHERE SOURCE = '{src}' ({cursor.rowcount} lignes supprimées)"
+                )
 
         # ── 3. Insertion en batch haute performance ──
         insert_sql = f"""
